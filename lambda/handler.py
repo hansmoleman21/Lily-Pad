@@ -33,9 +33,6 @@ from phrases import RECORD, QUERY, SUMMARY, DELETE
 # ── Config ────────────────────────────────────────────────────────────────────
 
 TABLE_NAME = os.environ["DYNAMODB_TABLE"]
-ALLOWED_NUMBERS = set(
-    filter(None, os.environ.get("ALLOWED_PHONE_NUMBERS", "").split(","))
-)
 
 dynamodb = boto3.resource("dynamodb")
 table = dynamodb.Table(TABLE_NAME)
@@ -57,6 +54,11 @@ def _fetch_ssm_secret(path: str) -> str:
 # Fetched once per Lambda container lifetime (cold start only)
 AUTH_TOKEN = _fetch_ssm_secret(
     os.environ.get("TWILIO_AUTH_TOKEN_SSM_PATH", "")
+)
+ALLOWED_NUMBERS = set(
+    filter(None, _fetch_ssm_secret(
+        os.environ.get("ALLOWED_PHONE_NUMBERS_SSM_PATH", "")
+    ).split(","))
 )
 
 # ── Event display labels ──────────────────────────────────────────────────────

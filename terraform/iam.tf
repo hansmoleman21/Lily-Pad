@@ -23,10 +23,10 @@ resource "aws_iam_role_policy_attachment" "lambda_basic" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# DynamoDB read/write on the lily-events table only
+# DynamoDB read/write/delete on the lily-events table only
 data "aws_iam_policy_document" "dynamodb_access" {
   statement {
-    actions   = ["dynamodb:PutItem", "dynamodb:Query"]
+    actions   = ["dynamodb:PutItem", "dynamodb:Query", "dynamodb:DeleteItem"]
     resources = [aws_dynamodb_table.lily_events.arn]
   }
 }
@@ -37,11 +37,11 @@ resource "aws_iam_role_policy" "dynamodb_access" {
   policy = data.aws_iam_policy_document.dynamodb_access.json
 }
 
-# SSM read access for the Twilio auth token (SecureString)
+# SSM read access for all /lily-pad/* parameters (auth token, allowed numbers, etc.)
 data "aws_iam_policy_document" "ssm_access" {
   statement {
     actions   = ["ssm:GetParameter"]
-    resources = [aws_ssm_parameter.twilio_auth_token.arn]
+    resources = ["arn:aws:ssm:${var.aws_region}:*:parameter/lily-pad/*"]
   }
 }
 

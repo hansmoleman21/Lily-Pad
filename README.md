@@ -8,13 +8,13 @@ query recent history. Works from iPhone and Apple Watch with no app install.
 ### 1. AWS account
 
 1. Create a free AWS account at https://aws.amazon.com
-2. In the IAM console, create an IAM user with **programmatic access**
-   (or use IAM Identity Center for SSO — either works)
-3. Attach the `AdministratorAccess` policy to that user
-   _(you can lock this down later once everything is running)_
-4. Save the Access Key ID and Secret Access Key
+2. In the IAM console, create an IAM user named `lily-pad-admin` with programmatic access
+3. Attach the policy from `iam/lily-pad-admin-policy.json` — scoped to only what's needed, with MFA required for all operations
+4. Set up an MFA device for the user (see `admin-notes.md`)
 5. Install the AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html
-6. Run `aws configure` and paste in your credentials + region (e.g. `us-east-1`)
+6. Run `aws configure --profile lily-pad-admin` and enter your credentials and region (`us-west-2`)
+
+Before each Terraform session, get temporary credentials using your MFA code (see `admin-notes.md`).
 
 ### 2. Twilio account
 
@@ -24,18 +24,32 @@ query recent history. Works from iPhone and Apple Watch with no app install.
 
 ### 3. Terraform
 
-Install Terraform: https://developer.hashicorp.com/terraform/install
+Install [tfenv](https://github.com/tfutils/tfenv) to manage Terraform versions:
 
-### 4. Deploy
+```bash
+brew install tfenv
+tfenv install  # reads .terraform-version automatically
+```
+
+### 4. Create SSM parameters
+
+All secrets and personal data are stored in SSM Parameter Store — nothing sensitive goes in source code or `tfvars`.
+
+Create these parameters before deploying (see `admin-notes.md` for the full commands):
+
+| Parameter | Description |
+|---|---|
+| `/lily-pad/twilio-auth-token` | Twilio Auth Token |
+| `/lily-pad/allowed-phone-numbers` | Comma-separated E.164 numbers allowed to use the service |
+
+### 5. Deploy
 
 ```bash
 cd terraform
 
-# Create a tfvars file with your secrets (never commit this)
+# Create a tfvars file with your Twilio Account SID (never commit this)
 cat > terraform.tfvars <<EOF
-twilio_account_sid    = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-twilio_auth_token     = "your_auth_token_here"
-allowed_phone_numbers = "+15555550100"   # your phone number in E.164 format
+twilio_account_sid = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 EOF
 
 terraform init
@@ -45,10 +59,10 @@ terraform apply
 After `apply` succeeds, Terraform prints the webhook URL:
 
 ```
-webhook_url = "https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/sms"
+webhook_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/sms"
 ```
 
-### 5. Wire up Twilio
+### 6. Wire up Twilio
 
 1. In the Twilio Console, go to **Phone Numbers → Manage → Active Numbers**
 2. Click your number
@@ -61,15 +75,36 @@ webhook_url = "https://xxxxxxxx.execute-api.us-east-1.amazonaws.com/sms"
 
 Text your Twilio number:
 
+### Logging events
+
+| Message | Logged as |
+|---|---|
+| `poop` / `pooped` | Poop (normal) |
+| `soft poop` | Poop (soft) |
+| `diarrhea` | Poop (diarrhea) |
+| `peed` / `pee` | Pee |
+| `vomited` / `threw up` | Vomit |
+| `bile` / `vomited bile` | Vomit (bile) |
+| `vomited food` | Vomit (food) |
+| `ate off the ground` | Ate ground |
+
+### Querying
+
+| Message | Response |
+|---|---|
+| `last poop?` | Time of the last poop |
+| `how many pees today?` | Today's pee count |
+| `summary` / `summary today` | Full breakdown of today's events |
+
+### Managing records
+
 | Message | Effect |
 |---|---|
-| `lily pooped` | Logs a poop event |
-| `lily peed` | Logs a pee event |
-| `lily vomited` | Logs a vomit event |
-| `lily ate something off the ground` | Logs an ate_ground event |
-| `last poop?` | Replies with the time of the last poop |
-| `how many pees today?` | Replies with today's pee count |
+| `remove last` / `undo` | Deletes the most recent entry |
+
+Phrases are matched case-insensitively as substrings — voice-to-text friendly.
+Edit `lambda/phrases.py` to add aliases or new event types.
 
 ## Costs
 
-~$1–2/month (Twilio phone number + SMS; AWS is within free tier).
+~$1–2/month (Twilio phone number + SMS; AWS usage is within free tier).

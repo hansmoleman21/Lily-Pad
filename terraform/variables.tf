@@ -16,8 +16,3 @@ variable "twilio_auth_token" {
   sensitive   = true
 }
 
-variable "allowed_phone_numbers" {
-  description = "Comma-separated list of E.164 phone numbers allowed to log events (e.g. +15555550100,+15555550101)"
-  type        = string
-  default     = ""
-}
