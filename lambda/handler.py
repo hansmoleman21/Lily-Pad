@@ -22,12 +22,13 @@ import os
 import urllib.parse
 import xml.sax.saxutils
 from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, Tuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY
+from phrases import RECORD, QUERY, SUMMARY, DELETE
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -69,6 +70,9 @@ EVENT_LABELS = {
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
 
+PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -80,6 +84,12 @@ def iso_now() -> str:
 def start_of_today_utc() -> str:
     d = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
     return d.isoformat(timespec="seconds")
+
+
+def start_of_today_pacific() -> str:
+    """Midnight Pacific time today, expressed as a UTC ISO 8601 string for DynamoDB queries."""
+    midnight_pacific = datetime.now(PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight_pacific.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
 def format_time(iso: str) -> str:
@@ -121,6 +131,20 @@ def query_last(event_type: str) -> Optional[dict]:
     return items[0] if items else None
 
 
+def delete_last_event() -> Optional[dict]:
+    """Find and delete the most recent event across all event types. Returns the deleted item or None."""
+    candidates = []
+    for event_type in EVENT_LABELS:
+        item = query_last(event_type)
+        if item:
+            candidates.append(item)
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda x: x["timestamp"])
+    table.delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
+    return latest
+
+
 def query_count_today(event_type: str) -> int:
     """Return the number of events of this type since midnight UTC today."""
     resp = table.query(
@@ -131,6 +155,42 @@ def query_count_today(event_type: str) -> int:
         Select="COUNT",
     )
     return resp["Count"]
+
+
+def query_today_events(event_type: str) -> list:
+    """Return all event items for this type since midnight Pacific time today."""
+    resp = table.query(
+        KeyConditionExpression=(
+            Key("event_type").eq(event_type)
+            & Key("timestamp").gte(start_of_today_pacific())
+        ),
+    )
+    return resp.get("Items", [])
+
+
+SUMMARY_LABELS = {
+    "poop":       "Poops",
+    "pee":        "Pees",
+    "vomit":      "Vomits",
+    "ate_ground": "Ate ground",
+}
+
+
+def build_summary_today() -> str:
+    lines = ["Today's summary:"]
+    for event_type, label in SUMMARY_LABELS.items():
+        items = query_today_events(event_type)
+        count = len(items)
+        if count > 0 and event_type in ("poop", "vomit"):
+            attr_counts: dict = {}
+            for item in items:
+                attr = item.get("attribute", "unspecified")
+                attr_counts[attr] = attr_counts.get(attr, 0) + 1
+            attr_str = ", ".join(f"{v} {k}" for k, v in attr_counts.items())
+            lines.append(f"{label}: {count} ({attr_str})")
+        else:
+            lines.append(f"{label}: {count}")
+    return "\n".join(lines)
 
 
 # ── Phrase matching ───────────────────────────────────────────────────────────
@@ -165,6 +225,10 @@ def match_record(text: str) -> Optional[Tuple[str, Optional[str]]]:
     return None
 
 
+def match_delete(text: str) -> bool:
+    return any(_contains(text, phrase) for phrase in DELETE)
+
+
 def match_query(text: str) -> Optional[Tuple[str, str]]:
     """
     Returns (event_type, query_kind) if the text matches a query phrase.
@@ -181,7 +245,18 @@ def match_query(text: str) -> Optional[Tuple[str, str]]:
 # ── Message handling ──────────────────────────────────────────────────────────
 
 def handle_message(body: str) -> str:
-    # Queries take priority (so "last poop?" doesn't accidentally log a poop)
+    # Delete takes priority over everything else
+    if match_delete(body):
+        deleted = delete_last_event()
+        if deleted is None:
+            return "No records found to delete."
+        event_type = deleted["event_type"]
+        past_tense, _ = EVENT_LABELS[event_type]
+        attr = deleted.get("attribute")
+        attr_str = f" ({attr})" if attr else ""
+        return f"Deleted: Lily {past_tense}{attr_str} {format_time(deleted['timestamp'])}."
+
+    # Queries take priority over recording (so "last poop?" doesn't accidentally log a poop)
     query_match = match_query(body)
     if query_match:
         event_type, kind = query_match

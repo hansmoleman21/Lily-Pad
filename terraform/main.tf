@@ -13,7 +13,7 @@ terraform {
   # backend "s3" {
   #   bucket = "your-terraform-state-bucket"
   #   key    = "lily-pad/terraform.tfstate"
-  #   region = "us-east-1"
+  #   region = "us-west-2"
   #   encrypt = true
   # }
 }

@@ -89,6 +89,31 @@ RECORD = {
 
 }
 
+# ── Summary ───────────────────────────────────────────────────────────────────
+
+SUMMARY = [
+    "summary today",
+    "today's summary",
+    "today summary",
+    "daily summary",
+    "how's lily today",
+    "how is lily today",
+    "summary",
+]
+
+# ── Delete ────────────────────────────────────────────────────────────────────
+
+DELETE = [
+    "remove last",
+    "delete last",
+    "undo last",
+    "undo",
+    "remove last record",
+    "delete last record",
+    "remove last entry",
+    "delete last entry",
+]
+
 # ── Queries ───────────────────────────────────────────────────────────────────
 # Structure: { query_kind: { event_type: [phrases] } }
 
