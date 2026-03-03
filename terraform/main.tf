@@ -8,14 +8,12 @@ terraform {
     }
   }
 
-  # Recommended: enable this after creating an S3 bucket for state storage.
-  # S3 keeps state off your laptop and supports encryption at rest.
-  # backend "s3" {
-  #   bucket = "your-terraform-state-bucket"
-  #   key    = "lily-pad/terraform.tfstate"
-  #   region = "us-west-2"
-  #   encrypt = true
-  # }
+  backend "s3" {
+    bucket  = "lily-pad-terraform-state-us-west-2"
+    key     = "lily-pad/terraform.tfstate"
+    region  = "us-west-2"
+    encrypt = true
+  }
 }
 
 provider "aws" {
@@ -27,14 +25,8 @@ provider "aws" {
 # The Lambda reads this path at cold start — the actual token never appears
 # in the Lambda configuration or environment variables.
 
-resource "aws_ssm_parameter" "twilio_auth_token" {
-  name  = "/lily-pad/twilio-auth-token"
-  type  = "SecureString"
-  value = var.twilio_auth_token
-
-  tags = {
-    Project = "lily-pad"
-  }
+data "aws_ssm_parameter" "twilio_auth_token" {
+  name = "/lily-pad/twilio-auth-token"
 }
 
 # ── DynamoDB ──────────────────────────────────────────────────────────────────
@@ -83,7 +75,7 @@ resource "aws_lambda_function" "lily_pad" {
     variables = {
       DYNAMODB_TABLE                  = aws_dynamodb_table.lily_events.name
       TWILIO_ACCOUNT_SID              = var.twilio_account_sid
-      TWILIO_AUTH_TOKEN_SSM_PATH      = aws_ssm_parameter.twilio_auth_token.name
+      TWILIO_AUTH_TOKEN_SSM_PATH      = data.aws_ssm_parameter.twilio_auth_token.name
       ALLOWED_PHONE_NUMBERS_SSM_PATH  = "/lily-pad/allowed-phone-numbers"
     }
   }

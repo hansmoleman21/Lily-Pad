@@ -10,9 +10,3 @@ variable "twilio_account_sid" {
   sensitive   = true
 }
 
-variable "twilio_auth_token" {
-  description = "Twilio Auth Token (used to validate inbound webhook signatures)"
-  type        = string
-  sensitive   = true
-}
-
