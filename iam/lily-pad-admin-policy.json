@@ -27,6 +27,7 @@
         "lambda:DeleteFunction",
         "lambda:GetFunction",
         "lambda:GetFunctionConfiguration",
+        "lambda:GetFunctionCodeSigningConfig",
         "lambda:AddPermission",
         "lambda:RemovePermission",
         "lambda:GetPolicy",
