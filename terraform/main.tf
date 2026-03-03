@@ -76,7 +76,6 @@ resource "aws_lambda_function" "lily_pad" {
       DYNAMODB_TABLE                  = aws_dynamodb_table.lily_events.name
       TWILIO_ACCOUNT_SID              = var.twilio_account_sid
       TWILIO_AUTH_TOKEN_SSM_PATH      = data.aws_ssm_parameter.twilio_auth_token.name
-      ALLOWED_PHONE_NUMBERS_SSM_PATH  = "/lily-pad/allowed-phone-numbers"
     }
   }
 

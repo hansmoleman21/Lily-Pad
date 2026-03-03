@@ -55,11 +55,6 @@ def _fetch_ssm_secret(path: str) -> str:
 AUTH_TOKEN = _fetch_ssm_secret(
     os.environ.get("TWILIO_AUTH_TOKEN_SSM_PATH", "")
 )
-ALLOWED_NUMBERS = set(
-    filter(None, _fetch_ssm_secret(
-        os.environ.get("ALLOWED_PHONE_NUMBERS_SSM_PATH", "")
-    ).split(","))
-)
 
 # ── Event display labels ──────────────────────────────────────────────────────
 
@@ -356,11 +351,7 @@ def lambda_handler(event: dict, context) -> dict:
         return {"statusCode": 403, "body": "Forbidden"}
 
     params = dict(urllib.parse.parse_qsl(raw_body))
-    from_number = params.get("From", "")
     sms_body = params.get("Body", "").strip()
-
-    if ALLOWED_NUMBERS and from_number not in ALLOWED_NUMBERS:
-        return twiml_response("Sorry, you're not authorized to use Lily Pad.")
 
     reply = handle_message(sms_body)
     return twiml_response(reply)
