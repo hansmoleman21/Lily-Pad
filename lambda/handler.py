@@ -1,23 +1,24 @@
 """
-Lily Pad — SMS handler Lambda
+Lily Pad — Lambda handler
 
-Receives inbound Twilio webhooks, parses the message body, writes events to
-DynamoDB, and replies with a TwiML SMS response.
+Supports two inbound routes:
+  POST /sms  — Twilio webhook (HMAC-SHA1 signature validation, TwiML response)
+  POST /log  — Apple Shortcuts (API key validation, JSON response)
 
 Environment variables
 ---------------------
 DYNAMODB_TABLE              : DynamoDB table name (lily-events)
 TWILIO_ACCOUNT_SID          : Twilio Account SID (informational, not used in validation)
-TWILIO_AUTH_TOKEN_SSM_PATH  : SSM Parameter Store path for the Twilio Auth Token
-                              (e.g. /lily-pad/twilio-auth-token)
-                              Leave unset to skip signature validation (dev only).
-ALLOWED_PHONE_NUMBERS       : Comma-separated E.164 numbers allowed to log events.
-                              Leave empty to allow all (fine if it's just you).
+TWILIO_AUTH_TOKEN_SSM_PATH  : SSM path for the Twilio Auth Token
+                              Leave unset to skip Twilio signature validation (dev only).
+API_KEY_SSM_PATH            : SSM path for the Shortcuts API key
+                              Leave unset to skip API key validation (dev only).
 """
 
 import base64
 import hashlib
 import hmac
+import json
 import os
 import urllib.parse
 import xml.sax.saxutils
@@ -54,6 +55,9 @@ def _fetch_ssm_secret(path: str) -> str:
 # Fetched once per Lambda container lifetime (cold start only)
 AUTH_TOKEN = _fetch_ssm_secret(
     os.environ.get("TWILIO_AUTH_TOKEN_SSM_PATH", "")
+)
+API_KEY = _fetch_ssm_secret(
+    os.environ.get("API_KEY_SSM_PATH", "")
 )
 
 # ── Event display labels ──────────────────────────────────────────────────────
@@ -327,6 +331,14 @@ def validate_twilio_signature(event: dict, raw_body: str) -> bool:
 
 # ── Lambda entry point ────────────────────────────────────────────────────────
 
+def json_response(message: str, status: int = 200) -> dict:
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({"message": message}),
+    }
+
+
 def twiml_response(message: str) -> dict:
     # XML-escape the message to prevent injection if message content ever changes
     escaped = xml.sax.saxutils.escape(message)
@@ -341,17 +353,34 @@ def twiml_response(message: str) -> dict:
     }
 
 
+def handle_twilio(event: dict, raw_body: str) -> dict:
+    if not validate_twilio_signature(event, raw_body):
+        return {"statusCode": 403, "body": "Forbidden"}
+    params = dict(urllib.parse.parse_qsl(raw_body))
+    sms_body = params.get("Body", "").strip()
+    return twiml_response(handle_message(sms_body))
+
+
+def handle_shortcut(event: dict, raw_body: str) -> dict:
+    headers = event.get("headers") or {}
+    provided_key = headers.get("x-api-key", "")
+    if not API_KEY or not hmac.compare_digest(API_KEY, provided_key):
+        return json_response("Unauthorized", status=403)
+    try:
+        text = json.loads(raw_body).get("text", "").strip()
+    except (json.JSONDecodeError, AttributeError):
+        return json_response("Invalid request body", status=400)
+    if not text:
+        return json_response("Missing 'text' field", status=400)
+    return json_response(handle_message(text))
+
+
 def lambda_handler(event: dict, context) -> dict:
-    # Decode body once; reuse for both signature validation and param parsing
     raw_body = event.get("body", "") or ""
     if event.get("isBase64Encoded"):
         raw_body = base64.b64decode(raw_body).decode("utf-8")
 
-    if not validate_twilio_signature(event, raw_body):
-        return {"statusCode": 403, "body": "Forbidden"}
-
-    params = dict(urllib.parse.parse_qsl(raw_body))
-    sms_body = params.get("Body", "").strip()
-
-    reply = handle_message(sms_body)
-    return twiml_response(reply)
+    path = event.get("rawPath", "")
+    if path == "/log":
+        return handle_shortcut(event, raw_body)
+    return handle_twilio(event, raw_body)

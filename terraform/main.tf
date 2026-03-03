@@ -76,6 +76,7 @@ resource "aws_lambda_function" "lily_pad" {
       DYNAMODB_TABLE                  = aws_dynamodb_table.lily_events.name
       TWILIO_ACCOUNT_SID              = var.twilio_account_sid
       TWILIO_AUTH_TOKEN_SSM_PATH      = data.aws_ssm_parameter.twilio_auth_token.name
+      API_KEY_SSM_PATH                = "/lily-pad/shortcuts-api-key"
     }
   }
 
@@ -105,6 +106,12 @@ resource "aws_apigatewayv2_integration" "lambda" {
 resource "aws_apigatewayv2_route" "sms" {
   api_id    = aws_apigatewayv2_api.lily_pad.id
   route_key = "POST /sms"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+resource "aws_apigatewayv2_route" "log" {
+  api_id    = aws_apigatewayv2_api.lily_pad.id
+  route_key = "POST /log"
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
