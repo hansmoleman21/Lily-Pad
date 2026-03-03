@@ -19,7 +19,8 @@ fi
 
 MFA_SERIAL="arn:aws:iam::${ACCOUNT_ID}:mfa/${MFA_DEVICE_NAME}"
 
-read -rp "MFA token code: " TOKEN_CODE
+printf "MFA token code: "
+read -r TOKEN_CODE
 
 OUTPUT=$(aws sts get-session-token \
     --profile "$PROFILE" \
