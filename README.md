@@ -7,13 +7,13 @@ Dog activity logger. Log Lily's events and query recent history from iPhone or A
 ### 1. AWS account
 
 1. Create a free AWS account at https://aws.amazon.com
-2. In the IAM console, create an IAM user named `lily-pad-admin` with programmatic access
+2. In the IAM console, create an IAM user with programmatic access
 3. Attach the policy from `iam/lily-pad-admin-policy.json` — scoped to only what's needed, with MFA required for all operations
-4. Set up an MFA device for the user (see `admin-notes.md`)
+4. Set up an MFA device for the user
 5. Install the AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html
-6. Run `aws configure --profile lily-pad-admin` and enter your credentials and region (`us-west-2`)
+6. Run `aws configure --profile lily-pad` and enter your credentials and region (`us-west-2`)
 
-Before each Terraform session, get temporary credentials using your MFA code (see `admin-notes.md`).
+Before each Terraform session, get temporary credentials using your MFA code.
 
 ### 2. Terraform
 
