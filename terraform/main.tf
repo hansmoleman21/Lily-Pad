@@ -29,6 +29,12 @@ data "aws_ssm_parameter" "twilio_auth_token" {
   name = "/lily-pad/twilio-auth-token"
 }
 
+resource "aws_ssm_parameter" "shortcuts_api_key" {
+  name  = "/lily-pad/shortcuts-api-key"
+  type  = "SecureString"
+  value = var.shortcuts_api_key
+}
+
 # ── DynamoDB ──────────────────────────────────────────────────────────────────
 
 resource "aws_dynamodb_table" "lily_events" {

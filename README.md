@@ -40,26 +40,28 @@ Create these parameters before deploying (see `admin-notes.md` for the full comm
 | Parameter | Description |
 |---|---|
 | `/lily-pad/twilio-auth-token` | Twilio Auth Token |
-| `/lily-pad/allowed-phone-numbers` | Comma-separated E.164 numbers allowed to use the service |
+| `/lily-pad/shortcuts-api-key` | API key for the Apple Shortcuts `/log` endpoint |
 
 ### 5. Deploy
 
 ```bash
 cd terraform
 
-# Create a tfvars file with your Twilio Account SID (never commit this)
+# Create a tfvars file with your secrets (never commit this)
 cat > terraform.tfvars <<EOF
 twilio_account_sid = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+shortcuts_api_key  = "your-random-secret-key"
 EOF
 
 terraform init
 terraform apply
 ```
 
-After `apply` succeeds, Terraform prints the webhook URL:
+After `apply` succeeds, Terraform prints the URLs:
 
 ```
 webhook_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/sms"
+log_url     = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/log"
 ```
 
 ### 6. Wire up Twilio
@@ -70,6 +72,25 @@ webhook_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/sms"
    - **Webhook**: paste the `webhook_url` from Terraform output
    - **HTTP method**: `HTTP POST`
 4. Save
+
+### 7. Apple Shortcuts (optional)
+
+The `/log` endpoint lets you log events from iPhone or Apple Watch without SMS — useful for quick taps from a widget or watch complication.
+
+**Build the shortcut:**
+
+1. Open the Shortcuts app and create a new shortcut
+2. Add a **Get Contents of URL** action with:
+   - **URL**: the `log_url` from Terraform output
+   - **Method**: POST
+   - **Headers**: `x-api-key: <your-shortcuts-api-key>`, `Content-Type: application/json`
+   - **Request Body**: JSON — `{"text": "poop"}` (or any phrase from the Usage section)
+3. Optionally add a **Show Result** action to display the confirmation message
+
+**Tips:**
+- Duplicate the shortcut for each event type you want a one-tap button for
+- Or use an **Ask for Input** / **Choose from Menu** action for a flexible single shortcut
+- Add the shortcut to your Home Screen or Apple Watch for quick access
 
 ## Usage
 

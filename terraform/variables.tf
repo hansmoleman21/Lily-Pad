@@ -10,3 +10,9 @@ variable "twilio_account_sid" {
   sensitive   = true
 }
 
+variable "shortcuts_api_key" {
+  description = "API key for the Apple Shortcuts /log endpoint"
+  type        = string
+  sensitive   = true
+}
+

@@ -94,19 +94,17 @@ def start_of_today_pacific() -> str:
 
 
 def format_time(iso: str) -> str:
-    """Convert a UTC ISO 8601 string to a friendly display string."""
+    """Convert a UTC ISO 8601 string to a friendly Pacific-time display string."""
     dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
-    # Hardcoded to US Eastern. Change -5 to -4 during Daylight Saving Time,
-    # or replace with a proper timezone library (e.g. zoneinfo) if desired.
-    eastern = dt.astimezone(timezone(timedelta(hours=-5)))
-    now_eastern = now_utc().astimezone(timezone(timedelta(hours=-5)))
-    time_str = eastern.strftime("%-I:%M %p")
-    if eastern.date() == now_eastern.date():
+    local = dt.astimezone(PACIFIC)
+    now_local = now_utc().astimezone(PACIFIC)
+    time_str = local.strftime("%-I:%M %p")
+    if local.date() == now_local.date():
         return f"today at {time_str}"
-    elif eastern.date() == (now_eastern - timedelta(days=1)).date():
+    elif local.date() == (now_local - timedelta(days=1)).date():
         return f"yesterday at {time_str}"
     else:
-        return eastern.strftime("%b %-d at ") + time_str
+        return local.strftime("%b %-d at ") + time_str
 
 
 # ── DynamoDB helpers ──────────────────────────────────────────────────────────
@@ -147,11 +145,11 @@ def delete_last_event() -> Optional[dict]:
 
 
 def query_count_today(event_type: str) -> int:
-    """Return the number of events of this type since midnight UTC today."""
+    """Return the number of events of this type since midnight Pacific time today."""
     resp = table.query(
         KeyConditionExpression=(
             Key("event_type").eq(event_type)
-            & Key("timestamp").gte(start_of_today_utc())
+            & Key("timestamp").gte(start_of_today_pacific())
         ),
         Select="COUNT",
     )
