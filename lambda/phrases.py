@@ -26,7 +26,6 @@ RECORD = {
         # Voice-to-text mishears / shortcuts
         "lili pad",   # mishear of "lily peed"
         "lily pad",   # same
-        "lily p",     # lazy shorthand
     ],
 
     "poop": {

@@ -1,27 +1,20 @@
 """
 Lily Pad — Lambda handler
 
-Supports two inbound routes:
-  POST /sms  — Twilio webhook (HMAC-SHA1 signature validation, TwiML response)
+Route:
   POST /log  — Apple Shortcuts (API key validation, JSON response)
 
 Environment variables
 ---------------------
-DYNAMODB_TABLE              : DynamoDB table name (lily-events)
-TWILIO_ACCOUNT_SID          : Twilio Account SID (informational, not used in validation)
-TWILIO_AUTH_TOKEN_SSM_PATH  : SSM path for the Twilio Auth Token
-                              Leave unset to skip Twilio signature validation (dev only).
-API_KEY_SSM_PATH            : SSM path for the Shortcuts API key
-                              Leave unset to skip API key validation (dev only).
+DYNAMODB_TABLE   : DynamoDB table name (lily-events)
+API_KEY_SSM_PATH : SSM path for the Shortcuts API key
+                   Leave unset to skip API key validation (dev only).
 """
 
 import base64
-import hashlib
 import hmac
 import json
 import os
-import urllib.parse
-import xml.sax.saxutils
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Tuple
@@ -53,9 +46,6 @@ def _fetch_ssm_secret(path: str) -> str:
 
 
 # Fetched once per Lambda container lifetime (cold start only)
-AUTH_TOKEN = _fetch_ssm_secret(
-    os.environ.get("TWILIO_AUTH_TOKEN_SSM_PATH", "")
-)
 API_KEY = _fetch_ssm_secret(
     os.environ.get("API_KEY_SSM_PATH", "")
 )
@@ -167,28 +157,32 @@ def query_today_events(event_type: str) -> list:
     return resp.get("Items", [])
 
 
-SUMMARY_LABELS = {
-    "poop":       "Poops",
-    "pee":        "Pees",
-    "vomit":      "Vomits",
-    "ate_ground": "Ate ground",
-}
+def time_since(iso: str) -> str:
+    """Return a Siri-readable string like '1 hour 20 minutes ago' or '45 minutes ago'."""
+    delta = now_utc() - datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+    total_minutes = int(delta.total_seconds() // 60)
+    days, remainder = divmod(total_minutes, 1440)
+    hours, minutes = divmod(remainder, 60)
+
+    def _p(n, word):
+        return f"{n} {word}{'s' if n != 1 else ''}"
+
+    if days > 0:
+        return f"{_p(days, 'day')} {_p(hours, 'hour')} ago"
+    elif hours > 0:
+        return f"{_p(hours, 'hour')} {_p(minutes, 'minute')} ago"
+    else:
+        return f"{_p(minutes, 'minute')} ago"
 
 
 def build_summary_today() -> str:
-    lines = ["Today's summary:"]
-    for event_type, label in SUMMARY_LABELS.items():
-        items = query_today_events(event_type)
-        count = len(items)
-        if count > 0 and event_type in ("poop", "vomit"):
-            attr_counts: dict = {}
-            for item in items:
-                attr = item.get("attribute", "unspecified")
-                attr_counts[attr] = attr_counts.get(attr, 0) + 1
-            attr_str = ", ".join(f"{v} {k}" for k, v in attr_counts.items())
-            lines.append(f"{label}: {count} ({attr_str})")
+    lines = []
+    for event_type, label in [("poop", "Poop"), ("pee", "Pee"), ("ate_ground", "Ate off the ground")]:
+        last = query_last(event_type)
+        if last:
+            lines.append(f"{label}: {time_since(last['timestamp'])}")
         else:
-            lines.append(f"{label}: {count}")
+            lines.append(f"{label}: never")
     return "\n".join(lines)
 
 
@@ -255,6 +249,10 @@ def handle_message(body: str) -> str:
         attr_str = f" ({attr})" if attr else ""
         return f"Deleted: Lily {past_tense}{attr_str} {format_time(deleted['timestamp'])}."
 
+    # Summary
+    if any(_contains(body, phrase) for phrase in SUMMARY):
+        return build_summary_today()
+
     # Queries take priority over recording (so "last poop?" doesn't accidentally log a poop)
     query_match = match_query(body)
     if query_match:
@@ -293,40 +291,6 @@ def handle_message(body: str) -> str:
     )
 
 
-# ── Twilio signature validation ───────────────────────────────────────────────
-
-def validate_twilio_signature(event: dict, raw_body: str) -> bool:
-    """
-    Validates the X-Twilio-Signature header using HMAC-SHA1.
-    Returns True if AUTH_TOKEN is unset (dev mode) or signature matches.
-    See: https://www.twilio.com/docs/usage/webhooks/webhooks-security
-    """
-    if not AUTH_TOKEN:
-        return True
-
-    headers = event.get("headers") or {}
-    signature = headers.get("x-twilio-signature", "")
-
-    # Reconstruct the URL as Twilio sees it.
-    # In API Gateway v2, the 'host' header is the API Gateway domain — reliable.
-    host = headers.get("host", "")
-    path = event.get("rawPath", "/sms")
-    url = f"https://{host}{path}"
-
-    params = dict(urllib.parse.parse_qsl(raw_body))
-
-    # Twilio's algorithm: URL + alphabetically sorted param name+value pairs
-    validation_string = url + "".join(
-        f"{k}{v}" for k, v in sorted(params.items())
-    )
-    expected_bytes = hmac.new(
-        AUTH_TOKEN.encode(), validation_string.encode(), hashlib.sha1
-    ).digest()
-    expected_b64 = base64.b64encode(expected_bytes).decode()
-
-    return hmac.compare_digest(expected_b64, signature)
-
-
 # ── Lambda entry point ────────────────────────────────────────────────────────
 
 def json_response(message: str, status: int = 200) -> dict:
@@ -335,28 +299,6 @@ def json_response(message: str, status: int = 200) -> dict:
         "headers": {"Content-Type": "application/json"},
         "body": json.dumps({"message": message}),
     }
-
-
-def twiml_response(message: str) -> dict:
-    # XML-escape the message to prevent injection if message content ever changes
-    escaped = xml.sax.saxutils.escape(message)
-    body = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        f"<Response><Message>{escaped}</Message></Response>"
-    )
-    return {
-        "statusCode": 200,
-        "headers": {"Content-Type": "text/xml"},
-        "body": body,
-    }
-
-
-def handle_twilio(event: dict, raw_body: str) -> dict:
-    if not validate_twilio_signature(event, raw_body):
-        return {"statusCode": 403, "body": "Forbidden"}
-    params = dict(urllib.parse.parse_qsl(raw_body))
-    sms_body = params.get("Body", "").strip()
-    return twiml_response(handle_message(sms_body))
 
 
 def handle_shortcut(event: dict, raw_body: str) -> dict:
@@ -370,15 +312,15 @@ def handle_shortcut(event: dict, raw_body: str) -> dict:
         return json_response("Invalid request body", status=400)
     if not text:
         return json_response("Missing 'text' field", status=400)
-    return json_response(handle_message(text))
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/plain"},
+        "body": handle_message(text),
+    }
 
 
 def lambda_handler(event: dict, context) -> dict:
     raw_body = event.get("body", "") or ""
     if event.get("isBase64Encoded"):
         raw_body = base64.b64decode(raw_body).decode("utf-8")
-
-    path = event.get("rawPath", "")
-    if path == "/log":
-        return handle_shortcut(event, raw_body)
-    return handle_twilio(event, raw_body)
+    return handle_shortcut(event, raw_body)

@@ -25,10 +25,6 @@ provider "aws" {
 # The Lambda reads this path at cold start — the actual token never appears
 # in the Lambda configuration or environment variables.
 
-data "aws_ssm_parameter" "twilio_auth_token" {
-  name = "/lily-pad/twilio-auth-token"
-}
-
 resource "aws_ssm_parameter" "shortcuts_api_key" {
   name  = "/lily-pad/shortcuts-api-key"
   type  = "SecureString"
@@ -79,10 +75,8 @@ resource "aws_lambda_function" "lily_pad" {
 
   environment {
     variables = {
-      DYNAMODB_TABLE                  = aws_dynamodb_table.lily_events.name
-      TWILIO_ACCOUNT_SID              = var.twilio_account_sid
-      TWILIO_AUTH_TOKEN_SSM_PATH      = data.aws_ssm_parameter.twilio_auth_token.name
-      API_KEY_SSM_PATH                = "/lily-pad/shortcuts-api-key"
+      DYNAMODB_TABLE   = aws_dynamodb_table.lily_events.name
+      API_KEY_SSM_PATH = "/lily-pad/shortcuts-api-key"
     }
   }
 
@@ -107,12 +101,6 @@ resource "aws_apigatewayv2_integration" "lambda" {
   integration_type       = "AWS_PROXY"
   integration_uri        = aws_lambda_function.lily_pad.invoke_arn
   payload_format_version = "2.0"
-}
-
-resource "aws_apigatewayv2_route" "sms" {
-  api_id    = aws_apigatewayv2_api.lily_pad.id
-  route_key = "POST /sms"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
 resource "aws_apigatewayv2_route" "log" {

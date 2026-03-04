@@ -1,7 +1,6 @@
 # Lily Pad
 
-SMS-based dog activity logger. Text a Twilio number to log Lily's events and
-query recent history. Works from iPhone and Apple Watch with no app install.
+Dog activity logger. Log Lily's events and query recent history from iPhone or Apple Watch via Apple Shortcuts — no app install, no SMS required.
 
 ## Setup
 
@@ -16,13 +15,7 @@ query recent history. Works from iPhone and Apple Watch with no app install.
 
 Before each Terraform session, get temporary credentials using your MFA code (see `admin-notes.md`).
 
-### 2. Twilio account
-
-1. Sign up at https://www.twilio.com (free trial gives ~$15 credit)
-2. In the Twilio Console, buy a phone number (~$1/month)
-3. Note your **Account SID** and **Auth Token** from the Console dashboard
-
-### 3. Terraform
+### 2. Terraform
 
 Install [tfenv](https://github.com/tfutils/tfenv) to manage Terraform versions:
 
@@ -31,51 +24,37 @@ brew install tfenv
 tfenv install  # reads .terraform-version automatically
 ```
 
-### 4. Create SSM parameters
+### 3. Create SSM parameters
 
-All secrets and personal data are stored in SSM Parameter Store — nothing sensitive goes in source code or `tfvars`.
+All secrets are stored in SSM Parameter Store — nothing sensitive goes in source code or `tfvars`.
 
-Create these parameters before deploying (see `admin-notes.md` for the full commands):
+Create this parameter before deploying (see `admin-notes.md` for the full command):
 
 | Parameter | Description |
 |---|---|
-| `/lily-pad/twilio-auth-token` | Twilio Auth Token |
 | `/lily-pad/shortcuts-api-key` | API key for the Apple Shortcuts `/log` endpoint |
 
-### 5. Deploy
+### 4. Deploy
 
 ```bash
 cd terraform
 
 # Create a tfvars file with your secrets (never commit this)
 cat > terraform.tfvars <<EOF
-twilio_account_sid = "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-shortcuts_api_key  = "your-random-secret-key"
+shortcuts_api_key = "your-random-secret-key"
 EOF
 
 terraform init
 terraform apply
 ```
 
-After `apply` succeeds, Terraform prints the URLs:
+After `apply` succeeds, Terraform prints the URL:
 
 ```
-webhook_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/sms"
-log_url     = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/log"
+log_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/log"
 ```
 
-### 6. Wire up Twilio
-
-1. In the Twilio Console, go to **Phone Numbers → Manage → Active Numbers**
-2. Click your number
-3. Under **Messaging → A message comes in**, set:
-   - **Webhook**: paste the `webhook_url` from Terraform output
-   - **HTTP method**: `HTTP POST`
-4. Save
-
-### 7. Apple Shortcuts (optional)
-
-The `/log` endpoint lets you log events from iPhone or Apple Watch without SMS — useful for quick taps from a widget or watch complication.
+### 5. Apple Shortcuts
 
 **Build the shortcut:**
 
@@ -91,14 +70,15 @@ The `/log` endpoint lets you log events from iPhone or Apple Watch without SMS �
 - Duplicate the shortcut for each event type you want a one-tap button for
 - Or use an **Ask for Input** / **Choose from Menu** action for a flexible single shortcut
 - Add the shortcut to your Home Screen or Apple Watch for quick access
+- Use **Siri** to trigger shortcuts by name for hands-free logging
 
 ## Usage
 
-Text your Twilio number:
+Send any phrase below as the `text` field in a POST to `/log`.
 
 ### Logging events
 
-| Message | Logged as |
+| Text | Logged as |
 |---|---|
 | `poop` / `pooped` | Poop (normal) |
 | `soft poop` | Poop (soft) |
@@ -111,15 +91,15 @@ Text your Twilio number:
 
 ### Querying
 
-| Message | Response |
+| Text | Response |
 |---|---|
 | `last poop?` | Time of the last poop |
 | `how many pees today?` | Today's pee count |
-| `summary` / `summary today` | Full breakdown of today's events |
+| `summary` / `summary today` | Last occurrence of each event type |
 
 ### Managing records
 
-| Message | Effect |
+| Text | Effect |
 |---|---|
 | `remove last` / `undo` | Deletes the most recent entry |
 
@@ -128,4 +108,4 @@ Edit `lambda/phrases.py` to add aliases or new event types.
 
 ## Costs
 
-~$1–2/month (Twilio phone number + SMS; AWS usage is within free tier).
+~$0.50/month (AWS usage is within free tier for typical household use).
