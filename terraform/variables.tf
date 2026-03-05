@@ -4,8 +4,8 @@ variable "aws_region" {
   default     = "us-west-2"
 }
 
-variable "twilio_account_sid" {
-  description = "Twilio Account SID (used to validate inbound webhook signatures)"
+variable "shortcuts_api_key" {
+  description = "API key for the Apple Shortcuts /log endpoint"
   type        = string
   sensitive   = true
 }

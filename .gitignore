@@ -11,6 +11,9 @@ terraform/lambda_package.zip
 # Admin notes (contains account-specific details)
 admin-notes.md
 
+# Terminal session recordings
+typescript
+
 # Python
 __pycache__/
 *.pyc
