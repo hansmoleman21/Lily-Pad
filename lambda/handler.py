@@ -177,7 +177,7 @@ def time_since(iso: str) -> str:
 
 def build_summary_today() -> str:
     lines = []
-    for event_type, label in [("poop", "Poop"), ("pee", "Pee"), ("ate_ground", "Ate off the ground")]:
+    for event_type, label in [("pee", "Pee"), ("poop", "Poop"), ("ate_ground", "Ate off the ground")]:
         last = query_last(event_type)
         if last:
             lines.append(f"{label}: {time_since(last['timestamp'])}")
