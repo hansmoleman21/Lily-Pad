@@ -7,15 +7,32 @@ Dog activity logger. Log Lily's events and query recent history from iPhone or A
 ### 1. AWS account
 
 1. Create a free AWS account at https://aws.amazon.com
-2. In the IAM console, create an IAM user with programmatic access
-3. Attach the policy from `iam/lily-pad-admin-policy.json` — scoped to only what's needed, with MFA required for all operations
-4. Set up an MFA device for the user
-5. Install the AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html
-6. Run `aws configure --profile lily-pad` and enter your credentials and region (`us-west-2`)
+2. In the IAM console, create an IAM user with programmatic access:
+   - Go to IAM → Users → Create user
+   - Enable programmatic access (access key)
+3. Attach the policy from `iam/lily-pad-admin-policy.json`:
+   - On the permissions step, choose "Attach policies directly" → Create inline policy
+   - Paste the contents of `iam/lily-pad-admin-policy.json`
+4. Save the Access Key ID and Secret Access Key in a password manager
 
-Before each Terraform session, get temporary credentials using your MFA code.
+### 2. MFA setup (one-time)
 
-### 2. Terraform
+1. In the IAM console, go to your user → Security credentials
+2. Assign MFA device → Authenticator app
+3. Scan the QR code with your authenticator app (e.g. 1Password, Authy)
+4. Enter two consecutive codes to confirm
+
+### 3. AWS CLI
+
+Install the AWS CLI: https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html
+
+```bash
+aws configure --profile lily-pad
+```
+
+Enter your access key, secret, region (`us-west-2`), and output format (`json`).
+
+### 4. Terraform
 
 Install [tfenv](https://github.com/tfutils/tfenv) to manage Terraform versions:
 
@@ -24,17 +41,58 @@ brew install tfenv
 tfenv install  # reads .terraform-version automatically
 ```
 
-### 3. Create SSM parameters
+### 5. S3 state bucket (one-time)
+
+Create the S3 bucket used to store Terraform state:
+
+```bash
+aws s3api create-bucket \
+  --bucket lily-pad-terraform-state-us-west-2 \
+  --region us-west-2 \
+  --create-bucket-configuration LocationConstraint=us-west-2 && \
+aws s3api put-bucket-versioning \
+  --bucket lily-pad-terraform-state-us-west-2 \
+  --versioning-configuration Status=Enabled && \
+aws s3api put-bucket-encryption \
+  --bucket lily-pad-terraform-state-us-west-2 \
+  --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+```
+
+### 6. Before each Terraform session
+
+Get temporary credentials using your MFA code:
+
+```bash
+source scripts/aws-mfa-login.sh
+```
+
+Credentials are valid for 8 hours. Unset them when done:
+
+```bash
+unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+```
+
+### 7. Create SSM parameters (one-time, before terraform apply)
 
 All secrets are stored in SSM Parameter Store — nothing sensitive goes in source code or `tfvars`.
 
-Create this parameter before deploying (see `admin-notes.md` for the full command):
+Generate a random API key and store it:
+
+```bash
+openssl rand -hex 32
+
+aws ssm put-parameter \
+  --name "/lily-pad/shortcuts-api-key" \
+  --value "your_generated_key_here" \
+  --type SecureString \
+  --region us-west-2
+```
 
 | Parameter | Description |
 |---|---|
 | `/lily-pad/shortcuts-api-key` | API key for the Apple Shortcuts `/log` endpoint |
 
-### 4. Deploy
+### 8. Deploy
 
 ```bash
 cd terraform
@@ -54,7 +112,7 @@ After `apply` succeeds, Terraform prints the URL:
 log_url = "https://xxxxxxxx.execute-api.us-west-2.amazonaws.com/log"
 ```
 
-### 5. Apple Shortcuts
+### 9. Apple Shortcuts
 
 **Build the shortcut:**
 
