@@ -296,6 +296,10 @@ def handle_message(body: str) -> str:
     record_match = match_record(body)
     if record_match:
         event_type, attribute = record_match
+        if event_type == "ate_ground":
+            comma_idx = body.find(",")
+            extra = body[comma_idx + 1:].strip() if comma_idx != -1 else ""
+            attribute = extra if extra else "not specified"
         ts = record_event(event_type, attribute)
         past_tense, _ = EVENT_LABELS[event_type]
         attr_str = f" ({attribute})" if attribute else ""
