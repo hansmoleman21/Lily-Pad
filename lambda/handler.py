@@ -84,6 +84,13 @@ def start_of_today_pacific() -> str:
     return midnight_pacific.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def start_of_n_days_ago_pacific(days: int) -> str:
+    """Midnight Pacific time N days ago, as a UTC ISO 8601 string."""
+    midnight_pacific = datetime.now(PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
+    start = midnight_pacific - timedelta(days=days)
+    return start.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def format_time(iso: str) -> str:
     """Convert a UTC ISO 8601 string to a friendly Pacific-time display string."""
     dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
@@ -145,6 +152,26 @@ def query_count_today(event_type: str) -> int:
         Select="COUNT",
     )
     return resp["Count"]
+
+
+def query_last_n_days(event_type: str, days: int = 30) -> list:
+    """Return all events for this type in the last N days."""
+    cutoff = start_of_n_days_ago_pacific(days)
+    items = []
+    kwargs = dict(
+        KeyConditionExpression=(
+            Key("event_type").eq(event_type)
+            & Key("timestamp").gte(cutoff)
+        ),
+    )
+    while True:
+        resp = table.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        kwargs["ExclusiveStartKey"] = last_key
+    return items
 
 
 def query_today_events(event_type: str) -> list:
@@ -315,6 +342,28 @@ def handle_message(body: str) -> str:
     )
 
 
+# ── Dashboard data handler ────────────────────────────────────────────────────
+
+def handle_dashboard_data() -> dict:
+    all_events = []
+    for event_type in EVENT_LABELS:
+        for item in query_last_n_days(event_type, days=30):
+            all_events.append({
+                "event_type": item["event_type"],
+                "timestamp": item["timestamp"],
+                "attribute": item.get("attribute"),
+            })
+    all_events.sort(key=lambda x: x["timestamp"], reverse=True)
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": json.dumps({"events": all_events, "generated_at": iso_now()}),
+    }
+
+
 # ── Lambda entry point ────────────────────────────────────────────────────────
 
 def json_response(message: str, status: int = 200) -> dict:
@@ -347,4 +396,9 @@ def lambda_handler(event: dict, context) -> dict:
     raw_body = event.get("body", "") or ""
     if event.get("isBase64Encoded"):
         raw_body = base64.b64decode(raw_body).decode("utf-8")
+
+    route_key = event.get("routeKey", "")
+    if route_key == "GET /data":
+        return handle_dashboard_data()
+
     return handle_shortcut(event, raw_body)

@@ -127,3 +127,106 @@ resource "aws_lambda_permission" "api_gw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.lily_pad.execution_arn}/*/*"
 }
+
+# ── CloudFront HTTPS distribution ────────────────────────────────────────────
+
+resource "aws_cloudfront_origin_access_control" "dashboard" {
+  name                              = "lily-pad-dashboard"
+  origin_access_control_origin_type = "s3"
+  signing_behavior                  = "always"
+  signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_distribution" "dashboard" {
+  enabled             = true
+  default_root_object = "index.html"
+
+  origin {
+    domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
+    origin_id                = "s3-oac"
+    origin_access_control_id = aws_cloudfront_origin_access_control.dashboard.id
+  }
+
+  default_cache_behavior {
+    allowed_methods        = ["GET", "HEAD"]
+    cached_methods         = ["GET", "HEAD"]
+    target_origin_id       = "s3-oac"
+    viewer_protocol_policy = "redirect-to-https"
+
+    forwarded_values {
+      query_string = false
+      cookies { forward = "none" }
+    }
+  }
+
+
+  restrictions {
+    geo_restriction { restriction_type = "none" }
+  }
+
+  viewer_certificate {
+    cloudfront_default_certificate = true
+  }
+}
+
+# ── GET /data route ───────────────────────────────────────────────────────────
+
+resource "aws_apigatewayv2_route" "data" {
+  api_id    = aws_apigatewayv2_api.lily_pad.id
+  route_key = "GET /data"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
+}
+
+# ── Dashboard S3 Bucket ───────────────────────────────────────────────────────
+
+data "aws_caller_identity" "current" {}
+
+resource "aws_s3_bucket" "dashboard" {
+  bucket = "lily-pad-dashboard-${data.aws_caller_identity.current.account_id}"
+}
+
+resource "aws_s3_bucket_public_access_block" "dashboard" {
+  bucket                  = aws_s3_bucket.dashboard.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "dashboard_cloudfront_oac" {
+  bucket     = aws_s3_bucket.dashboard.id
+  depends_on = [aws_s3_bucket_public_access_block.dashboard]
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "AllowCloudFrontOAC"
+      Effect = "Allow"
+      Principal = { Service = "cloudfront.amazonaws.com" }
+      Action   = "s3:GetObject"
+      Resource = "${aws_s3_bucket.dashboard.arn}/*"
+      Condition = {
+        StringEquals = {
+          "AWS:SourceArn" = aws_cloudfront_distribution.dashboard.arn
+        }
+      }
+    }]
+  })
+}
+
+resource "aws_s3_object" "dashboard_image" {
+  bucket       = aws_s3_bucket.dashboard.id
+  key          = "Lily-and-DC.PNG"
+  source       = "${path.module}/../dashboard/Lily-and-DC.PNG"
+  content_type = "image/png"
+  etag         = filemd5("${path.module}/../dashboard/Lily-and-DC.PNG")
+}
+
+resource "aws_s3_object" "dashboard_html" {
+  bucket       = aws_s3_bucket.dashboard.id
+  key          = "index.html"
+  content_type = "text/html"
+  content      = templatefile("${path.module}/../dashboard/index.html.tpl", {
+    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  })
+  etag = filemd5("${path.module}/../dashboard/index.html.tpl")
+}
