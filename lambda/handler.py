@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,7 @@ EVENT_LABELS = {
     "pee":        ("peed",                          "pees"),
     "vomit":      ("vomited",                       "vomits"),
     "ate_ground": ("ate something off the ground",  "times eating off the ground"),
+    "note":       ("recorded a note",               "notes"),
 }
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -177,7 +178,7 @@ def time_since(iso: str) -> str:
 
 def build_summary_today() -> str:
     lines = []
-    for event_type, label in [("poop", "Poop"), ("pee", "Pee"), ("ate_ground", "Ate off the ground")]:
+    for event_type, label in [("pee", "Pee"), ("poop", "Poop"), ("ate_ground", "Ate off the ground")]:
         last = query_last(event_type)
         if last:
             lines.append(f"{label}: {time_since(last['timestamp'])}")
@@ -215,6 +216,19 @@ def match_record(text: str) -> Optional[Tuple[str, Optional[str]]]:
                 if _contains(text, phrase):
                     return (event_type, config.get("default_attribute"))
 
+    return None
+
+
+def match_note(text: str) -> Optional[str]:
+    """
+    If text begins with a note prefix (e.g. 'Note, ...'), return the extracted note content.
+    Returns None if no prefix matches.
+    """
+    lower = text.lower()
+    for prefix in NOTE_PREFIX:
+        if lower.startswith(prefix):
+            content = text[len(prefix):].strip()
+            return content if content else None
     return None
 
 
@@ -272,10 +286,20 @@ def handle_message(body: str) -> str:
             noun = plural.rstrip("s") if (count == 1 and plural.endswith("s")) else plural
             return f"Lily has had {count} {noun} today."
 
+    # Note (free-form text after "Note, ")
+    note_content = match_note(body)
+    if note_content:
+        ts = record_event("note", note_content)
+        return f"Note recorded: {note_content}"
+
     # Recording
     record_match = match_record(body)
     if record_match:
         event_type, attribute = record_match
+        if event_type == "ate_ground":
+            comma_idx = body.find(",")
+            extra = body[comma_idx + 1:].strip() if comma_idx != -1 else ""
+            attribute = extra if extra else "not specified"
         ts = record_event(event_type, attribute)
         past_tense, _ = EVENT_LABELS[event_type]
         attr_str = f" ({attribute})" if attribute else ""
