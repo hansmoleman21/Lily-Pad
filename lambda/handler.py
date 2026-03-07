@@ -22,7 +22,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -57,6 +57,7 @@ EVENT_LABELS = {
     "pee":        ("peed",                          "pees"),
     "vomit":      ("vomited",                       "vomits"),
     "ate_ground": ("ate something off the ground",  "times eating off the ground"),
+    "note":       ("recorded a note",               "notes"),
 }
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -218,6 +219,19 @@ def match_record(text: str) -> Optional[Tuple[str, Optional[str]]]:
     return None
 
 
+def match_note(text: str) -> Optional[str]:
+    """
+    If text begins with a note prefix (e.g. 'Note, ...'), return the extracted note content.
+    Returns None if no prefix matches.
+    """
+    lower = text.lower()
+    for prefix in NOTE_PREFIX:
+        if lower.startswith(prefix):
+            content = text[len(prefix):].strip()
+            return content if content else None
+    return None
+
+
 def match_delete(text: str) -> bool:
     return any(_contains(text, phrase) for phrase in DELETE)
 
@@ -271,6 +285,12 @@ def handle_message(body: str) -> str:
                 return f"Lily hasn't had any {plural} today."
             noun = plural.rstrip("s") if (count == 1 and plural.endswith("s")) else plural
             return f"Lily has had {count} {noun} today."
+
+    # Note (free-form text after "Note, ")
+    note_content = match_note(body)
+    if note_content:
+        ts = record_event("note", note_content)
+        return f"Note recorded: {note_content}"
 
     # Recording
     record_match = match_record(body)
