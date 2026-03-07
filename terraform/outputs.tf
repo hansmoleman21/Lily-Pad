@@ -10,3 +10,8 @@ output "dynamodb_table_name" {
 output "lambda_function_name" {
   value = aws_lambda_function.lily_pad.function_name
 }
+
+output "dashboard_url" {
+  description = "HTTPS URL of the dashboard (via CloudFront)"
+  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+}
