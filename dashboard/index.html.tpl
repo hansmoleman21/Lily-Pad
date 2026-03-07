@@ -151,7 +151,7 @@
     pee:        "Pee",
     poop:       "Poop",
     vomit:      "Vomit",
-    ate_ground: "Ate Ground",
+    ate_ground: "Ate Off Ground",
     note:       "Note"
   };
 
@@ -201,11 +201,23 @@
     return daysAgo === 0 || iso < pacificMidnightISO(daysAgo - 1);
   }
 
+  function timeSince(iso) {
+    var diffMs = Date.now() - new Date(iso).getTime();
+    var totalMin = Math.floor(diffMs / 60000);
+    var days  = Math.floor(totalMin / 1440);
+    var hours = Math.floor((totalMin % 1440) / 60);
+    var mins  = totalMin % 60;
+    function p(n, w) { return n + " " + w + (n !== 1 ? "s" : ""); }
+    if (days  > 0) return p(days,  "day")  + " " + p(hours, "hour")   + " ago";
+    if (hours > 0) return p(hours, "hour") + " " + p(mins,  "minute") + " ago";
+    return p(mins, "minute") + " ago";
+  }
+
   function renderSummary(events) {
     var todayCutoff = pacificMidnightISO(0);
     var todayEvents = events.filter(function(e) { return e.timestamp >= todayCutoff; });
 
-    var types = ["pee", "poop", "vomit", "ate_ground"];
+    var types = ["pee", "poop", "vomit"];
     var html = "";
     types.forEach(function(t) {
       var typeEvents = todayEvents.filter(function(e) { return e.event_type === t; });
@@ -223,10 +235,18 @@
         if (attrs.diarrhea) parts.push(attrs.diarrhea + " diarrhea");
         if (parts.length) detail = parts.join(", ");
       }
+      var lastStr = "";
+      if (t === "pee" || t === "poop") {
+        var allOfType = events.filter(function(e) { return e.event_type === t; });
+        if (allOfType.length) {
+          lastStr = "last: " + timeSince(allOfType[0].timestamp);
+        }
+      }
       html += '<div class="card ' + t + '">' +
               '<div class="card-label">' + TYPE_LABELS[t] + '</div>' +
               '<div class="card-count">' + count + '</div>' +
-              (detail ? '<div class="card-detail">' + detail + '</div>' : '') +
+              (detail  ? '<div class="card-detail">' + detail  + '</div>' : '') +
+              (lastStr ? '<div class="card-detail">' + lastStr + '</div>' : '') +
               '</div>';
     });
     document.getElementById("summary-cards").innerHTML = html;
