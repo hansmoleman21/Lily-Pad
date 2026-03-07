@@ -228,5 +228,7 @@ resource "aws_s3_object" "dashboard_html" {
   content      = templatefile("${path.module}/../dashboard/index.html.tpl", {
     api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
   })
-  etag = filemd5("${path.module}/../dashboard/index.html.tpl")
+  etag = md5(templatefile("${path.module}/../dashboard/index.html.tpl", {
+    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  }))
 }
