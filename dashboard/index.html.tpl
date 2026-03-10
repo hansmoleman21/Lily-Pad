@@ -46,6 +46,7 @@
     .card.poop  { border-top-color: #92400e; }
     .card.vomit { border-top-color: #f97316; }
     .card.ate_ground { border-top-color: #65a30d; }
+    .card.walk       { border-top-color: #3b82f6; }
     .card-label { font-size: 0.8rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
     .card-count { font-size: 2.25rem; font-weight: 700; line-height: 1; }
     .card-detail { font-size: 0.78rem; color: #94a3b8; margin-top: 0.3rem; }
@@ -67,6 +68,7 @@
     .feed-item.vomit      { border-left-color: #f97316; }
     .feed-item.ate_ground { border-left-color: #65a30d; }
     .feed-item.note       { border-left-color: #6366f1; }
+    .feed-item.walk       { border-left-color: #3b82f6; }
     .feed-type { font-weight: 600; font-size: 0.9rem; min-width: 80px; }
     .feed-attr { color: #64748b; font-size: 0.85rem; flex: 1; }
     .feed-time { color: #94a3b8; font-size: 0.8rem; white-space: nowrap; }
@@ -137,6 +139,13 @@
   </div>
 </section>
 
+<section id="walk-section">
+  <h2>Minutes Walked (14 days)</h2>
+  <div class="chart-box">
+    <canvas id="walk-chart" height="160"></canvas>
+  </div>
+</section>
+
 <section id="notes-section">
   <h2>Notes</h2>
   <div class="notes-list" id="notes-list">
@@ -152,7 +161,8 @@
     poop:       "Poop",
     vomit:      "Vomit",
     ate_ground: "Ate Off Ground",
-    note:       "Note"
+    note:       "Note",
+    walk:       "Walk"
   };
 
   var TYPE_COLORS = {
@@ -160,7 +170,8 @@
     poop:       "#92400e",
     vomit:      "#f97316",
     ate_ground: "#65a30d",
-    note:       "#6366f1"
+    note:       "#6366f1",
+    walk:       "#3b82f6"
   };
 
   function pacificMidnightISO(daysAgo) {
@@ -350,6 +361,35 @@
     document.getElementById("notes-list").innerHTML = html;
   }
 
+  function renderWalkChart(events) {
+    var labels = [], data = [];
+    for (var i = 13; i >= 0; i--) {
+      labels.push(dayLabelPacific(i));
+      var start = pacificMidnightISO(i);
+      var end   = i > 0 ? pacificMidnightISO(i - 1) : new Date().toISOString();
+      var mins  = events
+        .filter(function(e) { return e.event_type === "walk" && e.timestamp >= start && e.timestamp < end; })
+        .reduce(function(sum, e) { return sum + (parseInt(e.attribute) || 0); }, 0);
+      data.push(mins);
+    }
+    var ctx = document.getElementById("walk-chart").getContext("2d");
+    new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: labels,
+        datasets: [{ label: "Minutes", data: data, backgroundColor: "#3b82f6" }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 10 } } },
+          y: { beginAtZero: true, ticks: { stepSize: 10 } }
+        }
+      }
+    });
+  }
+
   function render(data) {
     var events = data.events || [];
     var generatedAt = data.generated_at
@@ -360,6 +400,7 @@
     renderFeed(events);
     renderActivityChart(events);
     renderPoopChart(events);
+    renderWalkChart(events);
     renderNotes(events);
   }
 

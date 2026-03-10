@@ -15,6 +15,7 @@ import base64
 import hmac
 import json
 import os
+import re
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, Tuple
@@ -22,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ EVENT_LABELS = {
     "vomit":      ("vomited",                       "vomits"),
     "ate_ground": ("ate something off the ground",  "times eating off the ground"),
     "note":       ("recorded a note",               "notes"),
+    "walk":       ("went for a walk",               "walks"),
 }
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -259,6 +261,45 @@ def match_note(text: str) -> Optional[str]:
     return None
 
 
+_WORD_TO_INT = {
+    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19,
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+}
+_TENS  = r"twenty|thirty|forty|fifty"
+_ONES  = r"one|two|three|four|five|six|seven|eight|nine"
+_TEENS = r"ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen"
+# Matches digit strings, compound word numbers ("twenty-five"), teens, or simple words
+_NUM_PAT = rf"(\d+|(?:{_TENS})(?:[- ](?:{_ONES}))?|{_TEENS}|{_ONES}|zero)"
+
+
+def _parse_num(s: str) -> int:
+    s = s.strip().lower()
+    if s.isdigit():
+        return int(s)
+    parts = s.replace("-", " ").split()
+    if len(parts) == 2:
+        return _WORD_TO_INT.get(parts[0], 0) + _WORD_TO_INT.get(parts[1], 0)
+    return _WORD_TO_INT.get(s, 0)
+
+
+def parse_walk_duration(text: str) -> Optional[int]:
+    hours = re.search(_NUM_PAT + r'\s*hour', text, re.IGNORECASE)
+    mins  = re.search(_NUM_PAT + r'\s*min',  text, re.IGNORECASE)
+    total = (_parse_num(hours.group(1)) * 60 if hours else 0) + (_parse_num(mins.group(1)) if mins else 0)
+    return total if total > 0 else None
+
+
+def match_walk(text: str) -> Optional[int]:
+    lower = text.lower()
+    for prefix in WALK_PREFIX:
+        if lower.startswith(prefix):
+            return parse_walk_duration(text[len(prefix):].strip())
+    return None
+
+
 def match_delete(text: str) -> bool:
     return any(_contains(text, phrase) for phrase in DELETE)
 
@@ -319,6 +360,12 @@ def handle_message(body: str) -> str:
         ts = record_event("note", note_content)
         return f"Note recorded: {note_content}"
 
+    # Walk (duration parsed from "Walk, 35 minutes" etc.)
+    walk_minutes = match_walk(body)
+    if walk_minutes is not None:
+        ts = record_event("walk", str(walk_minutes))
+        return f"Recorded: Lily went for a walk for {walk_minutes} minutes {format_time(ts)}."
+
     # Recording
     record_match = match_record(body)
     if record_match:
@@ -338,6 +385,7 @@ def handle_message(body: str) -> str:
         "peed\n"
         "vomited / bile / food\n"
         "ate off the ground\n"
+        "walk, 35 minutes\n"
         "last poop? / how many pees today?"
     )
 
