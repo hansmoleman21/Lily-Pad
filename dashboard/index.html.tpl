@@ -116,10 +116,10 @@
   </div>
 </section>
 
-<section id="feed-section">
-  <h2>Recent Activity</h2>
-  <div class="feed" id="feed">
-    <p class="status">Loading&hellip;</p>
+<section id="walk-section">
+  <h2>Minutes Walked (14 days)</h2>
+  <div class="chart-box">
+    <canvas id="walk-chart" height="160"></canvas>
   </div>
 </section>
 
@@ -139,16 +139,16 @@
   </div>
 </section>
 
-<section id="walk-section">
-  <h2>Minutes Walked (14 days)</h2>
-  <div class="chart-box">
-    <canvas id="walk-chart" height="160"></canvas>
-  </div>
-</section>
-
 <section id="notes-section">
   <h2>Notes</h2>
   <div class="notes-list" id="notes-list">
+    <p class="status">Loading&hellip;</p>
+  </div>
+</section>
+
+<section id="feed-section">
+  <h2>Recent Activity</h2>
+  <div class="feed" id="feed">
     <p class="status">Loading&hellip;</p>
   </div>
 </section>
@@ -272,6 +272,7 @@
     var html = "";
     feedEvents.forEach(function(e) {
       var attr = e.attribute || "";
+      if (e.event_type === "walk" && attr) attr = attr + " min";
       var attrHtml = attr ? '<span class="feed-attr">' + attr + '</span>' : '<span class="feed-attr"></span>';
       if (e.event_type === "note") {
         attrHtml = '<span class="feed-attr">' + attr + '</span>';
