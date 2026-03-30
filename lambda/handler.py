@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -93,6 +93,59 @@ def start_of_n_days_ago_pacific(days: int) -> str:
     return start.astimezone(timezone.utc).isoformat(timespec="seconds")
 
 
+def parse_pacific_datetime(text: str) -> Optional[str]:
+    """
+    Parse a natural language Pacific-time string into a UTC ISO 8601 string.
+    Supports:
+      - "yesterday H:MM AM/PM"
+      - "today H:MM AM/PM"
+      - "Month D H:MM AM/PM"  (full or abbreviated month name)
+    Returns None if parsing fails.
+    """
+    text = text.strip()
+    now_pacific = datetime.now(PACIFIC)
+
+    time_pat = r'(\d{1,2}):(\d{2})\s*(AM|PM)'
+
+    # "yesterday ..." / "today ..."
+    for keyword, delta in [("yesterday", timedelta(days=-1)), ("today", timedelta(0))]:
+        if text.lower().startswith(keyword):
+            m = re.search(time_pat, text, re.IGNORECASE)
+            if m:
+                hour, minute, ampm = int(m.group(1)), int(m.group(2)), m.group(3).upper()
+                if ampm == "PM" and hour != 12:
+                    hour += 12
+                elif ampm == "AM" and hour == 12:
+                    hour = 0
+                date = (now_pacific + delta).date()
+                dt = datetime(date.year, date.month, date.day, hour, minute, 0, tzinfo=PACIFIC)
+                return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    # "Month D H:MM AM/PM"
+    m = re.match(r'^([A-Za-z]+)\s+(\d{1,2})\s+(\d{1,2}):(\d{2})\s*(AM|PM)', text, re.IGNORECASE)
+    if m:
+        month_str, day = m.group(1), int(m.group(2))
+        hour, minute, ampm = int(m.group(3)), int(m.group(4)), m.group(5).upper()
+        if ampm == "PM" and hour != 12:
+            hour += 12
+        elif ampm == "AM" and hour == 12:
+            hour = 0
+        try:
+            month = datetime.strptime(month_str, "%B").month
+        except ValueError:
+            try:
+                month = datetime.strptime(month_str, "%b").month
+            except ValueError:
+                return None
+        try:
+            dt = datetime(now_pacific.year, month, day, hour, minute, 0, tzinfo=PACIFIC)
+        except ValueError:
+            return None
+        return dt.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+    return None
+
+
 def format_time(iso: str) -> str:
     """Convert a UTC ISO 8601 string to a friendly Pacific-time display string."""
     dt = datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
@@ -142,6 +195,24 @@ def delete_last_event() -> Optional[dict]:
     latest = max(candidates, key=lambda x: x["timestamp"])
     table.delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
     return latest
+
+
+def change_last_event_time(new_ts: str) -> Optional[dict]:
+    """Change the timestamp of the most recent event. Returns the updated item or None."""
+    candidates = []
+    for event_type in EVENT_LABELS:
+        item = query_last(event_type)
+        if item:
+            candidates.append(item)
+    if not candidates:
+        return None
+    latest = max(candidates, key=lambda x: x["timestamp"])
+    table.delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
+    new_item: dict = {"event_type": latest["event_type"], "timestamp": new_ts}
+    if "attribute" in latest:
+        new_item["attribute"] = latest["attribute"]
+    table.put_item(Item=new_item)
+    return {**latest, "timestamp": new_ts}
 
 
 def query_count_today(event_type: str) -> int:
@@ -300,6 +371,15 @@ def match_walk(text: str) -> Optional[int]:
     return None
 
 
+def match_change_time(text: str) -> Optional[str]:
+    """If text starts with a change-time prefix, return the time portion after the comma."""
+    lower = text.lower()
+    for prefix in CHANGE_TIME:
+        if lower.startswith(prefix):
+            return text[len(prefix):].strip()
+    return None
+
+
 def match_delete(text: str) -> bool:
     return any(_contains(text, phrase) for phrase in DELETE)
 
@@ -330,6 +410,21 @@ def handle_message(body: str) -> str:
         attr = deleted.get("attribute")
         attr_str = f" ({attr})" if attr else ""
         return f"Deleted: Lily {past_tense}{attr_str} {format_time(deleted['timestamp'])}."
+
+    # Change time
+    time_text = match_change_time(body)
+    if time_text is not None:
+        new_ts = parse_pacific_datetime(time_text)
+        if new_ts is None:
+            return "Couldn't parse that time. Try: change time, yesterday 5:10 PM"
+        updated = change_last_event_time(new_ts)
+        if updated is None:
+            return "No records found to update."
+        event_type = updated["event_type"]
+        past_tense, _ = EVENT_LABELS[event_type]
+        attr = updated.get("attribute")
+        attr_str = f" ({attr})" if attr else ""
+        return f"Updated: Lily {past_tense}{attr_str} {format_time(new_ts)}."
 
     # Summary
     if any(_contains(body, phrase) for phrase in SUMMARY):

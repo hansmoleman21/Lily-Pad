@@ -79,6 +79,9 @@ RECORD = {
 
     "ate_ground": [
         "ate off the ground", "ate something off the ground",
+        "eat off the ground", "eat something off the ground",
+        # Siri mishears "ate/eat" as "eight"
+        "eight off the ground", "eight something off the ground",
         "eating off the ground", "ate from the ground",
         "ate grass", "eating grass",
         "ate dirt", "eating dirt",
@@ -119,7 +122,16 @@ NOTE_PREFIX = ["note,"]
 
 # ── Walks ─────────────────────────────────────────────────────────────────────
 
-WALK_PREFIX = ["walk,"]
+WALK_PREFIX = ["walk,", "lock,"]
+
+# ── Change time ───────────────────────────────────────────────────────────────
+
+CHANGE_TIME = [
+    "change time,",
+    "update time,",
+    "set time,",
+    "correct time,",
+]
 
 # ── Queries ───────────────────────────────────────────────────────────────────
 # Structure: { query_kind: { event_type: [phrases] } }
