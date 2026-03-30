@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +60,7 @@ EVENT_LABELS = {
     "ate_ground": ("ate something off the ground",  "times eating off the ground"),
     "note":       ("recorded a note",               "notes"),
     "walk":       ("went for a walk",               "walks"),
+    "weight":     ("weighed",                        "weight entries"),
 }
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -371,6 +372,16 @@ def match_walk(text: str) -> Optional[int]:
     return None
 
 
+def match_weight(text: str) -> Optional[str]:
+    """If text starts with a weight prefix, return the numeric value as a string, or None."""
+    lower = text.lower()
+    for prefix in WEIGHT_PREFIX:
+        if lower.startswith(prefix):
+            m = re.search(r'(\d+(?:\.\d+)?)', text[len(prefix):])
+            return m.group(1) if m else None
+    return None
+
+
 def match_change_time(text: str) -> Optional[str]:
     """If text starts with a change-time prefix, return the time portion after the comma."""
     lower = text.lower()
@@ -411,6 +422,17 @@ def handle_message(body: str) -> str:
         attr_str = f" ({attr})" if attr else ""
         return f"Deleted: Lily {past_tense}{attr_str} {format_time(deleted['timestamp'])}."
 
+    # Last record query
+    if any(_contains(body, phrase) for phrase in LAST_RECORD):
+        candidates = [item for et in EVENT_LABELS if (item := query_last(et))]
+        if not candidates:
+            return "No records found."
+        latest = max(candidates, key=lambda x: x["timestamp"])
+        past_tense, _ = EVENT_LABELS[latest["event_type"]]
+        attr = latest.get("attribute")
+        attr_str = f" ({attr})" if attr else ""
+        return f"Last record: Lily {past_tense}{attr_str} {format_time(latest['timestamp'])}."
+
     # Change time
     time_text = match_change_time(body)
     if time_text is not None:
@@ -429,6 +451,19 @@ def handle_message(body: str) -> str:
     # Summary
     if any(_contains(body, phrase) for phrase in SUMMARY):
         return build_summary_today()
+
+    # Weight query
+    if any(_contains(body, phrase) for phrase in WEIGHT_QUERY):
+        item = query_last("weight")
+        if item is None:
+            return "No weight records found."
+        return f"Lily last weighed {item['attribute']} lbs {format_time(item['timestamp'])}."
+
+    # Weight recording
+    weight = match_weight(body)
+    if weight is not None:
+        ts = record_event("weight", weight)
+        return f"Recorded: Lily weighed {weight} lbs {format_time(ts)}."
 
     # Queries take priority over recording (so "last poop?" doesn't accidentally log a poop)
     query_match = match_query(body)

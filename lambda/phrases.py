@@ -124,6 +124,25 @@ NOTE_PREFIX = ["note,"]
 
 WALK_PREFIX = ["walk,", "lock,"]
 
+# ── Last record ───────────────────────────────────────────────────────────────
+
+LAST_RECORD = [
+    "what was the last update",
+    "what was the last record",
+    "last update",
+    "last record",
+    "last entry",
+]
+
+# ── Weight ────────────────────────────────────────────────────────────────────
+
+WEIGHT_PREFIX = ["weight,", "wait,"]
+
+WEIGHT_QUERY = [
+    "last weight", "current weight", "weight?",
+    "how much does lily weigh", "how much does she weigh",
+]
+
 # ── Change time ───────────────────────────────────────────────────────────────
 
 CHANGE_TIME = [
