@@ -15,3 +15,8 @@ output "dashboard_url" {
   description = "HTTPS URL of the dashboard (via CloudFront)"
   value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
 }
+
+output "public_dashboard_url" {
+  description = "HTTPS URL of the public dashboard (no notes) — safe to share"
+  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}/public.html"
+}
