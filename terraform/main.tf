@@ -232,3 +232,15 @@ resource "aws_s3_object" "dashboard_html" {
     api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
   }))
 }
+
+resource "aws_s3_object" "dashboard_html_public" {
+  bucket       = aws_s3_bucket.dashboard.id
+  key          = "public.html"
+  content_type = "text/html"
+  content      = templatefile("${path.module}/../dashboard/public.html.tpl", {
+    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  })
+  etag = md5(templatefile("${path.module}/../dashboard/public.html.tpl", {
+    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  }))
+}
