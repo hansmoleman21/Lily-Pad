@@ -58,6 +58,8 @@ EVENT_LABELS = {
     "pee":        ("peed",                          "pees"),
     "vomit":      ("vomited",                       "vomits"),
     "ate_ground": ("ate something off the ground",  "times eating off the ground"),
+    "bath":       ("had a bath",                     "baths"),
+    "brush":      ("got brushed",                    "brushing sessions"),
     "note":       ("recorded a note",               "notes"),
     "walk":       ("went for a walk",               "walks"),
     "weight":     ("weighed",                        "weight entries"),

@@ -77,6 +77,16 @@ RECORD = {
         ],
     },
 
+    "bath": [
+        "bath", "bathed", "gave a bath", "gave her a bath", "gave him a bath",
+        "had a bath",
+    ],
+
+    "brush": [
+        "brushed", "brush", "brushing",
+        "groomed", "groom", "grooming",
+    ],
+
     "ate_ground": [
         "ate off the ground", "ate something off the ground",
         "eat off the ground", "eat something off the ground",
@@ -163,6 +173,8 @@ QUERY = {
         "vomit":     ["last vomit", "last sick", "when vomit", "when did lily vomit",
                       "when did she throw up", "last threw up"],
         "ate_ground": ["last ate", "when ate", "when did lily eat off", "when did she eat off"],
+        "bath":  ["last bath", "when bath", "when did lily have a bath", "when did she have a bath"],
+        "brush": ["last brush", "last groom", "when brush", "when did lily get brushed", "when did she get brushed"],
     },
 
     "count": {
