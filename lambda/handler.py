@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -453,6 +453,14 @@ def handle_message(body: str) -> str:
     # Summary
     if any(_contains(body, phrase) for phrase in SUMMARY):
         return build_summary_today()
+
+    # Grooming query (returns both bath and brush)
+    if any(_contains(body, phrase) for phrase in GROOMING_QUERY):
+        bath = query_last("bath")
+        brush = query_last("brush")
+        bath_str  = format_time(bath["timestamp"])  if bath  else "never"
+        brush_str = format_time(brush["timestamp"]) if brush else "never"
+        return f"Last bath: {bath_str}.\nLast brush: {brush_str}."
 
     # Weight query
     if any(_contains(body, phrase) for phrase in WEIGHT_QUERY):

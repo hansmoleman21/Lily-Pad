@@ -319,7 +319,9 @@
   function renderActivityChart(events) {
     var labels = [];
     var peeData = [];
-    var poopData = [];
+    var poopNormalData = [];
+    var poopSoftData = [];
+    var poopDiarrheaData = [];
     for (var i = 13; i >= 0; i--) {
       labels.push(dayLabelPacific(i));
       var start = pacificMidnightISO(i);
@@ -328,7 +330,10 @@
         return e.timestamp >= start && e.timestamp < end;
       });
       peeData.push(dayEvents.filter(function(e) { return e.event_type === "pee"; }).length);
-      poopData.push(dayEvents.filter(function(e) { return e.event_type === "poop"; }).length);
+      var dayPoops = dayEvents.filter(function(e) { return e.event_type === "poop"; });
+      poopNormalData.push(dayPoops.filter(function(e) { return (e.attribute || "normal") === "normal"; }).length);
+      poopSoftData.push(dayPoops.filter(function(e) { return e.attribute === "soft"; }).length);
+      poopDiarrheaData.push(dayPoops.filter(function(e) { return e.attribute === "diarrhea"; }).length);
     }
     var ctx = document.getElementById("activity-chart").getContext("2d");
     new Chart(ctx, {
@@ -336,8 +341,10 @@
       data: {
         labels: labels,
         datasets: [
-          { label: "Pee",  data: peeData,  backgroundColor: "#fbbf24", stack: "a" },
-          { label: "Poop", data: poopData, backgroundColor: "#92400e", stack: "a" }
+          { label: "Pee",      data: peeData,          backgroundColor: "#fbbf24", stack: "a" },
+          { label: "Poop",     data: poopNormalData,   backgroundColor: "#92400e", stack: "a" },
+          { label: "Soft",     data: poopSoftData,     backgroundColor: "#eab308", stack: "a" },
+          { label: "Diarrhea", data: poopDiarrheaData, backgroundColor: "#ef4444", stack: "a" }
         ]
       },
       options: {

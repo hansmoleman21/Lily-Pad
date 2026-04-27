@@ -134,6 +134,13 @@ NOTE_PREFIX = ["note,"]
 
 WALK_PREFIX = ["walk,", "lock,"]
 
+# ── Grooming query (returns both bath and brush) ──────────────────────────────
+
+GROOMING_QUERY = [
+    "last grooming", "when was lily's last grooming", "when was her last grooming",
+    "last groom", "grooming?",
+]
+
 # ── Last record ───────────────────────────────────────────────────────────────
 
 LAST_RECORD = [
