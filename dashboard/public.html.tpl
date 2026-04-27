@@ -83,6 +83,19 @@
     }
     .chart-box h2 { margin-bottom: 0.75rem; }
 
+    /* Show More button */
+    .show-more-btn {
+      margin-top: 0.75rem;
+      padding: 0.5rem 1.25rem;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      color: #475569;
+      cursor: pointer;
+    }
+    .show-more-btn:hover { background: #e2e8f0; }
+
     /* Loading / error */
     .status { color: #64748b; font-style: italic; }
     .error  { color: #ef4444; }
@@ -131,6 +144,7 @@
   <div class="feed" id="feed">
     <p class="status">Loading&hellip;</p>
   </div>
+  <button class="show-more-btn" id="feed-more" style="display:none">Show More</button>
 </section>
 
 <script>
@@ -241,14 +255,13 @@
     document.getElementById("summary-cards").innerHTML = html;
   }
 
-  function renderFeed(events) {
-    var feedEvents = events.filter(function(e) { return e.event_type !== "note"; }).slice(0, 50);
-    if (!feedEvents.length) {
-      document.getElementById("feed").innerHTML = '<p class="status">No events found.</p>';
-      return;
-    }
+  var allFeedEvents = [];
+  var feedLimit = 50;
+
+  function applyFeedLimit() {
+    var visible = allFeedEvents.slice(0, feedLimit);
     var html = "";
-    feedEvents.forEach(function(e) {
+    visible.forEach(function(e) {
       var attr = e.attribute || "";
       if (e.event_type === "walk" && attr) attr = attr + " min";
       var attrHtml = attr ? '<span class="feed-attr">' + attr + '</span>' : '<span class="feed-attr"></span>';
@@ -259,7 +272,24 @@
               '</div>';
     });
     document.getElementById("feed").innerHTML = html;
+    document.getElementById("feed-more").style.display =
+      feedLimit < allFeedEvents.length ? "inline-block" : "none";
   }
+
+  function renderFeed(events) {
+    allFeedEvents = events.filter(function(e) { return e.event_type !== "note"; });
+    feedLimit = 50;
+    if (!allFeedEvents.length) {
+      document.getElementById("feed").innerHTML = '<p class="status">No events found.</p>';
+      return;
+    }
+    applyFeedLimit();
+  }
+
+  document.getElementById("feed-more").onclick = function() {
+    feedLimit += 50;
+    applyFeedLimit();
+  };
 
   function renderActivityChart(events) {
     var labels = [];
