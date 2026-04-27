@@ -343,7 +343,7 @@
         datasets: [
           { label: "Pee",      data: peeData,          backgroundColor: "#fbbf24", stack: "a" },
           { label: "Poop",     data: poopNormalData,   backgroundColor: "#92400e", stack: "a" },
-          { label: "Soft",     data: poopSoftData,     backgroundColor: "#eab308", stack: "a" },
+          { label: "Soft",     data: poopSoftData,     backgroundColor: "#fb923c", stack: "a" },
           { label: "Diarrhea", data: poopDiarrheaData, backgroundColor: "#ef4444", stack: "a" }
         ]
       },
@@ -372,7 +372,7 @@
         labels: ["Normal", "Soft", "Diarrhea"],
         datasets: [{
           data: [counts.normal, counts.soft, counts.diarrhea],
-          backgroundColor: ["#22c55e", "#eab308", "#ef4444"],
+          backgroundColor: ["#22c55e", "#fb923c", "#ef4444"],
           borderWidth: 2
         }]
       },
