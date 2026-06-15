@@ -134,6 +134,10 @@ NOTE_PREFIX = ["note,"]
 
 WALK_PREFIX = ["walk,", "lock,"]
 
+# ── Medicine ──────────────────────────────────────────────────────────────────
+
+MEDICINE_PREFIX = ["medicine,", "med,", "meds,"]
+
 # ── Grooming query (returns both bath and brush) ──────────────────────────────
 
 GROOMING_QUERY = [
@@ -180,8 +184,10 @@ QUERY = {
         "vomit":     ["last vomit", "last sick", "when vomit", "when did lily vomit",
                       "when did she throw up", "last threw up"],
         "ate_ground": ["last ate", "when ate", "when did lily eat off", "when did she eat off"],
-        "bath":  ["last bath", "when bath", "when did lily have a bath", "when did she have a bath"],
-        "brush": ["last brush", "last groom", "when brush", "when did lily get brushed", "when did she get brushed"],
+        "bath":     ["last bath", "when bath", "when did lily have a bath", "when did she have a bath"],
+        "brush":    ["last brush", "last groom", "when brush", "when did lily get brushed", "when did she get brushed"],
+        "walk":     ["last walk", "when walk", "when did lily walk", "when did she walk", "walk?"],
+        "medicine": ["last medicine", "last med", "last meds", "last dose", "when medicine", "medicine?"],
     },
 
     "count": {
