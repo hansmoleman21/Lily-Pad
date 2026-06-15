@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
+from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, MEDICINE_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +63,7 @@ EVENT_LABELS = {
     "note":       ("recorded a note",               "notes"),
     "walk":       ("went for a walk",               "walks"),
     "weight":     ("weighed",                        "weight entries"),
+    "medicine":   ("took medicine",                  "medicine doses"),
 }
 
 # ── Time helpers ──────────────────────────────────────────────────────────────
@@ -250,6 +251,16 @@ def query_last_n_days(event_type: str, days: int = 30) -> list:
     return items
 
 
+def query_last_n_items(event_type: str, n: int) -> list:
+    """Return the most recent N events for this type, regardless of age."""
+    resp = table.query(
+        KeyConditionExpression=Key("event_type").eq(event_type),
+        ScanIndexForward=False,
+        Limit=n,
+    )
+    return resp.get("Items", [])
+
+
 def query_today_events(event_type: str) -> list:
     """Return all event items for this type since midnight Pacific time today."""
     resp = table.query(
@@ -281,10 +292,14 @@ def time_since(iso: str) -> str:
 
 def build_summary_today() -> str:
     lines = []
-    for event_type, label in [("pee", "Pee"), ("poop", "Poop"), ("ate_ground", "Ate off the ground")]:
+    for event_type, label in [("pee", "Pee"), ("poop", "Poop"), ("walk", "Walk")]:
         last = query_last(event_type)
         if last:
-            lines.append(f"{label}: {time_since(last['timestamp'])}")
+            time_str = time_since(last['timestamp'])
+            if event_type == "walk" and last.get("attribute"):
+                lines.append(f"{label}: {time_str} ({last['attribute']} min)")
+            else:
+                lines.append(f"{label}: {time_str}")
         else:
             lines.append(f"{label}: never")
     return "\n".join(lines)
@@ -371,6 +386,15 @@ def match_walk(text: str) -> Optional[int]:
     for prefix in WALK_PREFIX:
         if lower.startswith(prefix):
             return parse_walk_duration(text[len(prefix):].strip())
+    return None
+
+
+def match_medicine(text: str) -> Optional[str]:
+    lower = text.lower()
+    for prefix in MEDICINE_PREFIX:
+        if lower.startswith(prefix):
+            content = text[len(prefix):].strip()
+            return content if content else None
     return None
 
 
@@ -506,6 +530,12 @@ def handle_message(body: str) -> str:
         ts = record_event("walk", str(walk_minutes))
         return f"Recorded: Lily went for a walk for {walk_minutes} minutes {format_time(ts)}."
 
+    # Medicine (description required: "medicine, 1 and 1/4 pills of Benadryl")
+    medicine_description = match_medicine(body)
+    if medicine_description is not None:
+        ts = record_event("medicine", medicine_description)
+        return f"Recorded: Lily took medicine ({medicine_description}) {format_time(ts)}."
+
     # Recording
     record_match = match_record(body)
     if record_match:
@@ -526,6 +556,7 @@ def handle_message(body: str) -> str:
         "vomited / bile / food\n"
         "ate off the ground\n"
         "walk, 35 minutes\n"
+        "medicine, 1 pill of Benadryl\n"
         "last poop? / how many pees today?"
     )
 
@@ -534,8 +565,21 @@ def handle_message(body: str) -> str:
 
 def handle_dashboard_data() -> dict:
     all_events = []
+    seen = set()
     for event_type in EVENT_LABELS:
         for item in query_last_n_days(event_type, days=30):
+            key = (item["event_type"], item["timestamp"])
+            if key not in seen:
+                seen.add(key)
+                all_events.append({
+                    "event_type": item["event_type"],
+                    "timestamp": item["timestamp"],
+                    "attribute": item.get("attribute"),
+                })
+    for item in query_last_n_items("weight", 5):
+        key = ("weight", item["timestamp"])
+        if key not in seen:
+            seen.add(key)
             all_events.append({
                 "event_type": item["event_type"],
                 "timestamp": item["timestamp"],

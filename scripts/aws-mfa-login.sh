@@ -1,14 +1,17 @@
 #!/bin/bash
 # Obtain temporary AWS credentials using MFA and export them to the current shell.
 #
-# Usage:  source scripts/aws-mfa-login.sh
+# Usage:  source scripts/aws-mfa-login.sh [profile]
+#
+# profile defaults to "lily-pad-admin" if not provided.
+# The MFA device is assumed to be named "<profile>-mfa".
 #
 # Must be sourced (not executed) so the exports persist in your shell session.
 # Credentials are valid for 8 hours. To clear them:
 #   unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
-PROFILE="lily-pad-admin"
-MFA_DEVICE_NAME="lily-pad-admin-mfa"
+PROFILE="${1:-lily-pad-admin}"
+MFA_DEVICE_NAME="${PROFILE}-mfa"
 DURATION=28800  # 8 hours
 
 ACCOUNT_ID=$(aws sts get-caller-identity --profile "$PROFILE" --query Account --output text 2>/dev/null)

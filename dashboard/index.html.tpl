@@ -144,11 +144,18 @@
 </section>
 
 <section id="poop-section">
-  <h2>Poop Quality (30 days)</h2>
+  <h2>Poop Quality (14 days)</h2>
   <div style="max-width: 320px;">
     <div class="chart-box">
       <canvas id="poop-chart" height="220"></canvas>
     </div>
+  </div>
+</section>
+
+<section id="weight-section">
+  <h2>Weight History (last 5 entries)</h2>
+  <div class="chart-box">
+    <canvas id="weight-chart" height="160"></canvas>
   </div>
 </section>
 
@@ -359,7 +366,8 @@
   }
 
   function renderPoopChart(events) {
-    var poops = events.filter(function(e) { return e.event_type === "poop"; });
+    var cutoff = pacificMidnightISO(13);
+    var poops = events.filter(function(e) { return e.event_type === "poop" && e.timestamp >= cutoff; });
     var counts = { normal: 0, soft: 0, diarrhea: 0 };
     poops.forEach(function(e) {
       var a = e.attribute || "normal";
@@ -379,6 +387,43 @@
       options: {
         responsive: true,
         plugins: { legend: { position: "bottom" } }
+      }
+    });
+  }
+
+  function renderWeightChart(events) {
+    var weights = events
+      .filter(function(e) { return e.event_type === "weight" && e.attribute; })
+      .sort(function(a, b) { return a.timestamp < b.timestamp ? -1 : 1; })
+      .slice(-5);
+    if (!weights.length) return;
+    var labels = weights.map(function(e) {
+      var d = new Date(e.timestamp);
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
+    });
+    var data = weights.map(function(e) { return parseFloat(e.attribute); });
+    var ctx = document.getElementById("weight-chart").getContext("2d");
+    new Chart(ctx, {
+      type: "line",
+      data: {
+        labels: labels,
+        datasets: [{
+          label: "Weight (lbs)",
+          data: data,
+          borderColor: "#8b5cf6",
+          backgroundColor: "rgba(139,92,246,0.08)",
+          pointBackgroundColor: "#8b5cf6",
+          pointRadius: 5,
+          tension: 0.3,
+          fill: true,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { ticks: { callback: function(v) { return v + " lbs"; } } }
+        }
       }
     });
   }
@@ -439,6 +484,7 @@
     renderActivityChart(events);
     renderPoopChart(events);
     renderWalkChart(events);
+    renderWeightChart(events);
     renderNotes(events);
   }
 
