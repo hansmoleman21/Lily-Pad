@@ -104,13 +104,16 @@ RECORD = {
 # ── Summary ───────────────────────────────────────────────────────────────────
 
 SUMMARY = [
-    "summary today",
-    "today's summary",
-    "today summary",
-    "daily summary",
     "how's lily today",
     "how is lily today",
     "summary",
+]
+
+DAILY_SUMMARY = [
+    "daily summary",
+    "summary today",
+    "today's summary",
+    "today summary",
 ]
 
 # ── Delete ────────────────────────────────────────────────────────────────────

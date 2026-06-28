@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from phrases import RECORD, QUERY, SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, MEDICINE_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
+from phrases import RECORD, QUERY, SUMMARY, DAILY_SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, MEDICINE_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -305,6 +305,30 @@ def build_summary_today() -> str:
     return "\n".join(lines)
 
 
+def build_daily_summary() -> str:
+    pee_count = query_count_today("pee")
+    poop_count = query_count_today("poop")
+
+    walk_events = query_today_events("walk")
+    walk_count = len(walk_events)
+    walk_minutes = 0
+    for e in walk_events:
+        try:
+            walk_minutes += int(e.get("attribute") or 0)
+        except (ValueError, TypeError):
+            pass
+
+    date_str = datetime.now(PACIFIC).strftime("%b %-d")
+    walk_str = f"{walk_count} ({walk_minutes} min total)" if walk_minutes > 0 else str(walk_count)
+
+    return (
+        f"Daily Summary ({date_str}):\n"
+        f"Pees: {pee_count}\n"
+        f"Poops: {poop_count}\n"
+        f"Walks: {walk_str}"
+    )
+
+
 # ── Phrase matching ───────────────────────────────────────────────────────────
 
 def _contains(text: str, phrase: str) -> bool:
@@ -474,7 +498,11 @@ def handle_message(body: str) -> str:
         attr_str = f" ({attr})" if attr else ""
         return f"Updated: Lily {past_tense}{attr_str} {format_time(new_ts)}."
 
-    # Summary
+    # Daily Summary (counts) — checked before generic Summary to avoid substring collision
+    if any(_contains(body, phrase) for phrase in DAILY_SUMMARY):
+        return build_daily_summary()
+
+    # Summary (time since last events)
     if any(_contains(body, phrase) for phrase in SUMMARY):
         return build_summary_today()
 
