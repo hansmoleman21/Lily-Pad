@@ -4,51 +4,76 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Lily Pad is an SMS-based dog activity logger. Texts to a Twilio number are POSTed to AWS API Gateway → Lambda → DynamoDB. No app install required; works from iPhone and Apple Watch.
+Lily Pad is a dog activity logger. Events are logged and queried from iPhone or Apple Watch
+via Apple Shortcuts — no app install, no SMS. A Shortcut POSTs a JSON message to an AWS API
+Gateway endpoint, which a Lambda parses, records to DynamoDB, and replies to with a friendly
+(Siri-readable) confirmation. A read-only web dashboard renders recent history.
 
 ## Architecture
 
 ```
-SMS → Twilio → API Gateway (HTTP POST /sms) → Lambda (Python 3.12) → DynamoDB
+Apple Shortcut → API Gateway (HTTP POST /log) → Lambda (Python 3.12) → DynamoDB
+Web dashboard  → API Gateway (HTTP GET  /data) → Lambda             → DynamoDB
+Dashboard HTML → S3 (private) → CloudFront (HTTPS)
 ```
 
-- **`lambda/handler.py`** — Lambda entry point. Validates Twilio signatures (HMAC-SHA1), parses form-encoded webhook payloads, dispatches to `handle_message()`, returns TwiML.
-- **`lambda/phrases.py`** — All trigger phrases for recording and querying events. Edit here to add voice-to-text aliases or new event types.
-- **`terraform/`** — All AWS infrastructure: DynamoDB table, Lambda, API Gateway v2, IAM roles, SSM parameter for the Twilio auth token.
+- **`lambda/handler.py`** — Lambda entry point (`lambda_handler`). Decodes the request body,
+  routes `GET /data` to `handle_dashboard_data()`, and otherwise treats the request as a
+  Shortcuts `POST /log`: validates the `x-api-key` header with a constant-time compare
+  (`hmac.compare_digest`), parses the JSON `{"text": ...}` body, dispatches to
+  `handle_message()`, and returns a plain-text reply.
+- **`lambda/phrases.py`** — All trigger phrases for recording and querying events. Edit here to
+  add voice-to-text aliases or new event types.
+- **`dashboard/index.html.tpl`, `dashboard/public.html.tpl`** — Dashboard templates. Terraform
+  renders them with the `/data` URL and uploads them to S3 (served via CloudFront).
+- **`terraform/`** — All AWS infrastructure: DynamoDB table, Lambda, API Gateway v2 (`/log`
+  and `/data` routes), IAM roles, the SSM parameter for the API key, and the S3 + CloudFront
+  dashboard. State is stored in an S3 backend (see `terraform/main.tf`).
 
 ### DynamoDB Schema
 
 Table: `lily-events`
-- Partition key: `event_type` (String) — e.g. `poop`, `pee`, `vomit`, `ate_ground`
+- Partition key: `event_type` (String) — e.g. `poop`, `pee`, `vomit`, `ate_ground`, `walk`,
+  `medicine`, `weight`, `note`, `bath`, `brush`
 - Sort key: `timestamp` (String, ISO 8601 UTC)
-- Optional attribute: `attribute` (e.g. `normal`, `soft`, `diarrhea`, `bile`, `food`)
+- Optional attribute: `attribute` — meaning varies by event type (e.g. `normal`/`soft`/`diarrhea`
+  for poop, walk duration in minutes, weight in lbs, free-form text for notes/medicine)
 
 ### Secret handling
 
-The Twilio auth token is stored in SSM Parameter Store as a SecureString at `/lily-pad/twilio-auth-token`. Lambda fetches it once per cold start. The token never appears in Lambda env vars in plaintext.
+The Apple Shortcuts API key is stored in SSM Parameter Store as a SecureString at
+`/lily-pad/shortcuts-api-key`. Lambda fetches it once per cold start (`_fetch_ssm_secret`),
+keyed off the `API_KEY_SSM_PATH` env var; the key never appears in Lambda env vars in plaintext.
+If `API_KEY_SSM_PATH` is unset, API-key validation is skipped (dev only).
 
 ### Phrase matching
 
-`match_query()` is checked before `match_record()` so a message like "last poop?" doesn't accidentally log an event. Within `RECORD`, attribute-specific phrases are checked before base phrases (so "soft poop" → `poop/soft`, not `poop/normal`).
+`handle_message()` dispatches in priority order. Management and query phrases are checked before
+recording phrases so that, e.g., "last poop?" doesn't accidentally log an event. Within
+`match_record()`, attribute-specific phrases are checked before base phrases (so "soft poop" →
+`poop/soft`, not `poop/normal`). All phrases are matched case-insensitively as substrings.
 
 ### Timezone note
 
-`format_time()` in `handler.py` is hardcoded to US Eastern (`UTC-5`). Update the `timedelta(hours=-5)` to `-4` during Daylight Saving Time, or switch to `zoneinfo` for automatic DST handling.
+Timestamps are stored in UTC ISO 8601 and displayed in US Pacific. Time handling uses
+`zoneinfo.ZoneInfo("America/Los_Angeles")` (the `PACIFIC` constant in `handler.py`), so DST is
+handled automatically — no manual offset to update.
 
 ## Deploy / Teardown
+
+Full one-time setup (AWS account, MFA, CLI profile, tfenv, S3 state bucket, and creating the
+`/lily-pad/shortcuts-api-key` SSM parameter) is documented in `README.md`. Once that's done:
 
 ```bash
 cd terraform
 
-# First-time setup — create terraform.tfvars with secrets (never commit this file)
+# First-time setup — create terraform.tfvars (never commit this file; it is .gitignored)
 cat > terraform.tfvars <<EOF
-twilio_account_sid    = "ACxxxx"
-twilio_auth_token     = "your_token"
-allowed_phone_numbers = "+15555550100"
+shortcuts_api_key = "your-random-secret-key"
 EOF
 
 terraform init
-terraform apply    # deploys everything; prints webhook_url
+terraform apply    # deploys everything; prints log_url
 terraform destroy  # tears down all AWS resources
 ```
 
@@ -56,7 +81,8 @@ Terraform zips `lambda/` automatically (via `archive_file`) — no manual packag
 
 ## Updating Lambda Code
 
-After editing `lambda/handler.py` or `lambda/phrases.py`, re-run `terraform apply`. Terraform detects the zip hash change and updates the function automatically.
+After editing `lambda/handler.py` or `lambda/phrases.py`, re-run `terraform apply`. Terraform
+detects the zip hash change and updates the function automatically.
 
 ## Adding a New Event Type
 

@@ -18,3 +18,7 @@ typescript
 __pycache__/
 *.pyc
 .env
+
+# macOS
+.DS_Store
+**/.DS_Store

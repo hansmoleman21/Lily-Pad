@@ -79,11 +79,6 @@ def iso_now() -> str:
     return now_utc().isoformat(timespec="seconds")
 
 
-def start_of_today_utc() -> str:
-    d = now_utc().replace(hour=0, minute=0, second=0, microsecond=0)
-    return d.isoformat(timespec="seconds")
-
-
 def start_of_today_pacific() -> str:
     """Midnight Pacific time today, expressed as a UTC ISO 8601 string for DynamoDB queries."""
     midnight_pacific = datetime.now(PACIFIC).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -549,7 +544,7 @@ def handle_message(body: str) -> str:
     # Note (free-form text after "Note, ")
     note_content = match_note(body)
     if note_content:
-        ts = record_event("note", note_content)
+        record_event("note", note_content)
         return f"Note recorded: {note_content}"
 
     # Walk (duration parsed from "Walk, 35 minutes" etc.)
