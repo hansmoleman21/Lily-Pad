@@ -18,6 +18,8 @@ typescript
 __pycache__/
 *.pyc
 .env
+.venv/
+.pytest_cache/
 
 # macOS
 .DS_Store
