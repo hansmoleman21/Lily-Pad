@@ -27,16 +27,6 @@ provider "aws" {
 # They are managed outside Terraform so their values never pass through
 # terraform.tfvars or get created from state.
 
-# The shortcuts key was previously a Terraform resource; forget it from state
-# without deleting the parameter. Remove this block after the first apply.
-removed {
-  from = aws_ssm_parameter.shortcuts_api_key
-
-  lifecycle {
-    destroy = false
-  }
-}
-
 data "aws_ssm_parameter" "dashboard_token" {
   name = "/lily-pad/dashboard-token"
 }
@@ -98,13 +88,6 @@ resource "aws_lambda_function" "lily_pad" {
   tags = {
     Project = "lily-pad"
   }
-}
-
-# The log group already exists (auto-created by the running function), so it
-# must be imported into state. Remove this import block after the first apply.
-import {
-  to = aws_cloudwatch_log_group.lambda
-  id = "/aws/lambda/lily-pad"
 }
 
 resource "aws_cloudwatch_log_group" "lambda" {
