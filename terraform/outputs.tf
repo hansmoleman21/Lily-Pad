@@ -12,11 +12,12 @@ output "lambda_function_name" {
 }
 
 output "dashboard_url" {
-  description = "HTTPS URL of the dashboard (via CloudFront)"
+  description = "HTTPS URL of the public dashboard (no notes) — safe to share; also the CloudFront root"
   value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
 }
 
-output "public_dashboard_url" {
-  description = "HTTPS URL of the public dashboard (no notes) — safe to share"
-  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}/public.html"
+output "private_dashboard_url" {
+  description = "Unguessable URL of the private dashboard (notes/medicine/weight) — bookmark it, don't share it. Retrieve with: terraform output -raw private_dashboard_url"
+  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}/${local.private_page_key}"
+  sensitive   = true
 }

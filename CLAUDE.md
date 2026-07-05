@@ -25,9 +25,11 @@ Dashboard HTML → S3 (private) → CloudFront (HTTPS)
 - **`lambda/phrases.py`** — All trigger phrases for recording and querying events. Edit here to
   add voice-to-text aliases or new event types.
 - **`dashboard/index.html.tpl`, `dashboard/public.html.tpl`** — Dashboard templates. Terraform
-  renders them with the `/data` URL (and, for the private `index.html`, the dashboard token)
-  and uploads them to S3 (served via CloudFront). All server-derived values are HTML-escaped
-  via `esc()` before hitting `innerHTML`.
+  renders them with the `/data` URL (and, for the private page, the dashboard token) and
+  uploads them to S3 (served via CloudFront). The public dashboard is the CloudFront root;
+  the private page (token embedded) is served at an unguessable path,
+  `lily-<random_id>.html` — get it with `terraform output -raw private_dashboard_url`. All
+  server-derived values are HTML-escaped via `esc()` before hitting `innerHTML`.
 - **`terraform/`** — All AWS infrastructure: DynamoDB table, Lambda, API Gateway v2 (`/log`
   and `/data` routes, CORS locked to the CloudFront origin), IAM roles, CloudWatch log groups
   (30-day retention), CloudFront security headers, and the S3 + CloudFront dashboard. State is

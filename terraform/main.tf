@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -215,7 +219,7 @@ resource "aws_cloudfront_response_headers_policy" "dashboard" {
 
 resource "aws_cloudfront_distribution" "dashboard" {
   enabled             = true
-  default_root_object = "index.html"
+  default_root_object = "public.html"
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -308,8 +312,16 @@ resource "aws_s3_object" "dashboard_image" {
   etag         = filemd5("${path.module}/../dashboard/Lily-and-DC.PNG")
 }
 
+# The private dashboard embeds the dashboard token, so it must not live at a
+# guessable path. It is served under a random key (stable across applies, kept
+# in state); the public dashboard is the CloudFront root instead.
+resource "random_id" "private_page" {
+  byte_length = 8
+}
+
 locals {
-  data_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  private_page_key = "lily-${random_id.private_page.hex}.html"
+  data_url         = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
 
   index_html = templatefile("${path.module}/../dashboard/index.html.tpl", {
     api_url         = local.data_url
@@ -323,7 +335,7 @@ locals {
 
 resource "aws_s3_object" "dashboard_html" {
   bucket       = aws_s3_bucket.dashboard.id
-  key          = "index.html"
+  key          = local.private_page_key
   content_type = "text/html"
   content      = local.index_html
   etag         = md5(local.index_html)
