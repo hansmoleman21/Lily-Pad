@@ -74,16 +74,18 @@ unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 
 ### 7. Create SSM parameters (one-time, before terraform apply)
 
-All secrets are stored in SSM Parameter Store — nothing sensitive goes in source code or `tfvars`.
-
-Generate a random API key and store it:
+All secrets are stored in SSM Parameter Store — nothing sensitive goes in source code, `tfvars`, or Terraform-managed resources. Generate a random value for each (`openssl rand -hex 32`) and store it:
 
 ```bash
-openssl rand -hex 32
-
 aws ssm put-parameter \
   --name "/lily-pad/shortcuts-api-key" \
-  --value "your_generated_key_here" \
+  --value "$(openssl rand -hex 32)" \
+  --type SecureString \
+  --region us-west-2
+
+aws ssm put-parameter \
+  --name "/lily-pad/dashboard-token" \
+  --value "$(openssl rand -hex 32)" \
   --type SecureString \
   --region us-west-2
 ```
@@ -91,17 +93,24 @@ aws ssm put-parameter \
 | Parameter | Description |
 |---|---|
 | `/lily-pad/shortcuts-api-key` | API key for the Apple Shortcuts `/log` endpoint |
+| `/lily-pad/dashboard-token` | Token baked into the private dashboard; unlocks the full `/data` payload (notes, medicine, weight) |
+
+Retrieve a value later (e.g. for the Apple Shortcut header):
+
+```bash
+aws ssm get-parameter --name "/lily-pad/shortcuts-api-key" \
+  --with-decryption --query Parameter.Value --output text --region us-west-2
+```
+
+To rotate either secret: `aws ssm put-parameter --overwrite` with a new value, update the
+`x-api-key` header in your Apple Shortcuts (for the shortcuts key), then re-run
+`terraform apply` so new Lambda containers pick it up (any code/config change forces this;
+otherwise wait for containers to recycle or update the function config manually).
 
 ### 8. Deploy
 
 ```bash
 cd terraform
-
-# Create a tfvars file with your secrets (never commit this)
-cat > terraform.tfvars <<EOF
-shortcuts_api_key = "your-random-secret-key"
-EOF
-
 terraform init
 terraform apply
 ```

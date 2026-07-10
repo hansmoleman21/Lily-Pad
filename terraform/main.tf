@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -21,14 +25,14 @@ provider "aws" {
 }
 
 # ── Secrets (SSM Parameter Store) ────────────────────────────────────────────
-# Stored as SecureString (AES-256 encrypted at rest).
-# The Lambda reads this path at cold start — the actual token never appears
-# in the Lambda configuration or environment variables.
+# Both secrets are SecureString parameters created manually (see README):
+#   /lily-pad/shortcuts-api-key — validated on POST /log
+#   /lily-pad/dashboard-token   — unlocks the full GET /data payload
+# They are managed outside Terraform so their values never pass through
+# terraform.tfvars or get created from state.
 
-resource "aws_ssm_parameter" "shortcuts_api_key" {
-  name  = "/lily-pad/shortcuts-api-key"
-  type  = "SecureString"
-  value = var.shortcuts_api_key
+data "aws_ssm_parameter" "dashboard_token" {
+  name = "/lily-pad/dashboard-token"
 }
 
 # ── DynamoDB ──────────────────────────────────────────────────────────────────
@@ -70,15 +74,29 @@ resource "aws_lambda_function" "lily_pad" {
   role             = aws_iam_role.lambda_exec.arn
   handler          = "handler.lambda_handler"
   runtime          = "python3.12"
+  memory_size      = 256
+  timeout          = 10
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 
   environment {
     variables = {
-      DYNAMODB_TABLE   = aws_dynamodb_table.lily_events.name
-      API_KEY_SSM_PATH = "/lily-pad/shortcuts-api-key"
+      DYNAMODB_TABLE           = aws_dynamodb_table.lily_events.name
+      API_KEY_SSM_PATH         = "/lily-pad/shortcuts-api-key"
+      DASHBOARD_TOKEN_SSM_PATH = "/lily-pad/dashboard-token"
     }
   }
+
+  depends_on = [aws_cloudwatch_log_group.lambda]
+
+  tags = {
+    Project = "lily-pad"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "lambda" {
+  name              = "/aws/lambda/lily-pad"
+  retention_in_days = 30
 
   tags = {
     Project = "lily-pad"
@@ -90,6 +108,16 @@ resource "aws_lambda_function" "lily_pad" {
 resource "aws_apigatewayv2_api" "lily_pad" {
   name          = "lily-pad"
   protocol_type = "HTTP"
+
+  # The x-dashboard-token header makes dashboard fetches non-simple requests,
+  # so the browser preflights them; HTTP APIs answer OPTIONS automatically
+  # when this block is set. Only the CloudFront origin is allowed.
+  cors_configuration {
+    allow_origins = ["https://${aws_cloudfront_distribution.dashboard.domain_name}"]
+    allow_methods = ["GET", "POST"]
+    allow_headers = ["content-type", "x-api-key", "x-dashboard-token"]
+    max_age       = 3600
+  }
 
   tags = {
     Project = "lily-pad"
@@ -109,6 +137,15 @@ resource "aws_apigatewayv2_route" "log" {
   target    = "integrations/${aws_apigatewayv2_integration.lambda.id}"
 }
 
+resource "aws_cloudwatch_log_group" "api_gw" {
+  name              = "/aws/apigateway/lily-pad"
+  retention_in_days = 30
+
+  tags = {
+    Project = "lily-pad"
+  }
+}
+
 resource "aws_apigatewayv2_stage" "default" {
   api_id      = aws_apigatewayv2_api.lily_pad.id
   name        = "$default"
@@ -117,6 +154,19 @@ resource "aws_apigatewayv2_stage" "default" {
   default_route_settings {
     throttling_burst_limit = 10
     throttling_rate_limit  = 5
+  }
+
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gw.arn
+    format = jsonencode({
+      requestId        = "$context.requestId"
+      ip               = "$context.identity.sourceIp"
+      requestTime      = "$context.requestTime"
+      routeKey         = "$context.routeKey"
+      status           = "$context.status"
+      responseLength   = "$context.responseLength"
+      integrationError = "$context.integrationErrorMessage"
+    })
   }
 }
 
@@ -137,9 +187,39 @@ resource "aws_cloudfront_origin_access_control" "dashboard" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_response_headers_policy" "dashboard" {
+  name = "lily-pad-dashboard-security-headers"
+
+  security_headers_config {
+    strict_transport_security {
+      access_control_max_age_sec = 31536000
+      include_subdomains         = true
+      override                   = true
+    }
+    content_type_options {
+      override = true
+    }
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+    content_security_policy {
+      # connect-src uses a region wildcard on purpose: referencing the API
+      # endpoint here would create a dependency cycle (API CORS needs the
+      # CloudFront domain, CloudFront needs this policy).
+      content_security_policy = "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src 'self'; connect-src https://*.execute-api.${var.aws_region}.amazonaws.com; base-uri 'none'; frame-ancestors 'none'"
+      override                = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "dashboard" {
   enabled             = true
-  default_root_object = "index.html"
+  default_root_object = "public.html"
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -148,10 +228,11 @@ resource "aws_cloudfront_distribution" "dashboard" {
   }
 
   default_cache_behavior {
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    target_origin_id       = "s3-oac"
-    viewer_protocol_policy = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    target_origin_id           = "s3-oac"
+    viewer_protocol_policy     = "redirect-to-https"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.dashboard.id
 
     forwarded_values {
       query_string = false
@@ -185,6 +266,16 @@ resource "aws_s3_bucket" "dashboard" {
   bucket = "lily-pad-dashboard-${data.aws_caller_identity.current.account_id}"
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "dashboard" {
+  bucket = aws_s3_bucket.dashboard.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 resource "aws_s3_bucket_public_access_block" "dashboard" {
   bucket                  = aws_s3_bucket.dashboard.id
   block_public_acls       = true
@@ -199,11 +290,11 @@ resource "aws_s3_bucket_policy" "dashboard_cloudfront_oac" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid    = "AllowCloudFrontOAC"
-      Effect = "Allow"
+      Sid       = "AllowCloudFrontOAC"
+      Effect    = "Allow"
       Principal = { Service = "cloudfront.amazonaws.com" }
-      Action   = "s3:GetObject"
-      Resource = "${aws_s3_bucket.dashboard.arn}/*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.dashboard.arn}/*"
       Condition = {
         StringEquals = {
           "AWS:SourceArn" = aws_cloudfront_distribution.dashboard.arn
@@ -221,26 +312,39 @@ resource "aws_s3_object" "dashboard_image" {
   etag         = filemd5("${path.module}/../dashboard/Lily-and-DC.PNG")
 }
 
+# The private dashboard embeds the dashboard token, so it must not live at a
+# guessable path. It is served under a random key (stable across applies, kept
+# in state); the public dashboard is the CloudFront root instead.
+resource "random_id" "private_page" {
+  byte_length = 8
+}
+
+locals {
+  private_page_key = "lily-${random_id.private_page.hex}.html"
+  data_url         = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+
+  index_html = templatefile("${path.module}/../dashboard/index.html.tpl", {
+    api_url         = local.data_url
+    dashboard_token = data.aws_ssm_parameter.dashboard_token.value
+  })
+
+  public_html = templatefile("${path.module}/../dashboard/public.html.tpl", {
+    api_url = local.data_url
+  })
+}
+
 resource "aws_s3_object" "dashboard_html" {
   bucket       = aws_s3_bucket.dashboard.id
-  key          = "index.html"
+  key          = local.private_page_key
   content_type = "text/html"
-  content      = templatefile("${path.module}/../dashboard/index.html.tpl", {
-    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
-  })
-  etag = md5(templatefile("${path.module}/../dashboard/index.html.tpl", {
-    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
-  }))
+  content      = local.index_html
+  etag         = md5(local.index_html)
 }
 
 resource "aws_s3_object" "dashboard_html_public" {
   bucket       = aws_s3_bucket.dashboard.id
   key          = "public.html"
   content_type = "text/html"
-  content      = templatefile("${path.module}/../dashboard/public.html.tpl", {
-    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
-  })
-  etag = md5(templatefile("${path.module}/../dashboard/public.html.tpl", {
-    api_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
-  }))
+  content      = local.public_html
+  etag         = md5(local.public_html)
 }

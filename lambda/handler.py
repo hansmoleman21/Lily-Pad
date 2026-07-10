@@ -1,17 +1,22 @@
 """
 Lily Pad — Lambda handler
 
-Route:
+Routes:
   POST /log  — Apple Shortcuts (API key validation, JSON response)
+  GET  /data — Dashboard data. A valid x-dashboard-token header gets the full
+               payload; otherwise a reduced public payload is served.
 
 Environment variables
 ---------------------
-DYNAMODB_TABLE   : DynamoDB table name (lily-events)
-API_KEY_SSM_PATH : SSM path for the Shortcuts API key
-                   Leave unset to skip API key validation (dev only).
+DYNAMODB_TABLE           : DynamoDB table name (lily-events)
+API_KEY_SSM_PATH         : SSM path for the Shortcuts API key. If unset or the
+                           fetch fails, all POST /log requests are rejected.
+DASHBOARD_TOKEN_SSM_PATH : SSM path for the dashboard token. If unset or the
+                           fetch fails, GET /data serves only the public payload.
 """
 
 import base64
+import functools
 import hmac
 import json
 import os
@@ -27,14 +32,25 @@ from phrases import RECORD, QUERY, SUMMARY, DAILY_SUMMARY, DELETE, NOTE_PREFIX, 
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-TABLE_NAME = os.environ["DYNAMODB_TABLE"]
+# Longest accepted /log message; transitively caps free-form note/medicine text.
+MAX_TEXT_LEN = 500
 
-dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(TABLE_NAME)
+# Event types withheld from the unauthenticated (public) dashboard payload.
+PUBLIC_EXCLUDED_TYPES = {"note", "medicine", "weight"}
+
+_TABLE = None
+
+
+def _table():
+    """DynamoDB table handle, created lazily (once per Lambda container)."""
+    global _TABLE
+    if _TABLE is None:
+        _TABLE = boto3.resource("dynamodb").Table(os.environ["DYNAMODB_TABLE"])
+    return _TABLE
 
 
 def _fetch_ssm_secret(path: str) -> str:
-    """Fetch a SecureString from SSM Parameter Store at cold start."""
+    """Fetch a SecureString from SSM Parameter Store."""
     if not path:
         return ""
     try:
@@ -42,14 +58,19 @@ def _fetch_ssm_secret(path: str) -> str:
         resp = client.get_parameter(Name=path, WithDecryption=True)
         return resp["Parameter"]["Value"]
     except Exception as e:
-        print(f"WARNING: Could not fetch SSM parameter '{path}': {e}")
+        print(f"ERROR: Could not fetch SSM parameter '{path}'; requests requiring it will be rejected: {e}")
         return ""
 
 
-# Fetched once per Lambda container lifetime (cold start only)
-API_KEY = _fetch_ssm_secret(
-    os.environ.get("API_KEY_SSM_PATH", "")
-)
+# Both secrets are fetched once per Lambda container lifetime.
+@functools.lru_cache(maxsize=None)
+def get_api_key() -> str:
+    return _fetch_ssm_secret(os.environ.get("API_KEY_SSM_PATH", ""))
+
+
+@functools.lru_cache(maxsize=None)
+def get_dashboard_token() -> str:
+    return _fetch_ssm_secret(os.environ.get("DASHBOARD_TOKEN_SSM_PATH", ""))
 
 # ── Event display labels ──────────────────────────────────────────────────────
 
@@ -167,13 +188,13 @@ def record_event(event_type: str, attribute: Optional[str]) -> str:
     item: dict = {"event_type": event_type, "timestamp": ts}
     if attribute is not None:
         item["attribute"] = attribute
-    table.put_item(Item=item)
+    _table().put_item(Item=item)
     return ts
 
 
 def query_last(event_type: str) -> Optional[dict]:
     """Return the most recent event item dict, or None."""
-    resp = table.query(
+    resp = _table().query(
         KeyConditionExpression=Key("event_type").eq(event_type),
         ScanIndexForward=False,
         Limit=1,
@@ -182,41 +203,43 @@ def query_last(event_type: str) -> Optional[dict]:
     return items[0] if items else None
 
 
-def delete_last_event() -> Optional[dict]:
-    """Find and delete the most recent event across all event types. Returns the deleted item or None."""
-    candidates = []
-    for event_type in EVENT_LABELS:
-        item = query_last(event_type)
-        if item:
-            candidates.append(item)
+def find_latest_event() -> Optional[dict]:
+    """
+    Return the most recent event across all event types, or None.
+    Bounded at one Limit=1 query per EVENT_LABELS entry (~10) — cheap enough
+    that no cross-type index is warranted.
+    """
+    candidates = [item for et in EVENT_LABELS if (item := query_last(et))]
     if not candidates:
         return None
-    latest = max(candidates, key=lambda x: x["timestamp"])
-    table.delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
+    return max(candidates, key=lambda x: x["timestamp"])
+
+
+def delete_last_event() -> Optional[dict]:
+    """Find and delete the most recent event across all event types. Returns the deleted item or None."""
+    latest = find_latest_event()
+    if latest is None:
+        return None
+    _table().delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
     return latest
 
 
 def change_last_event_time(new_ts: str) -> Optional[dict]:
     """Change the timestamp of the most recent event. Returns the updated item or None."""
-    candidates = []
-    for event_type in EVENT_LABELS:
-        item = query_last(event_type)
-        if item:
-            candidates.append(item)
-    if not candidates:
+    latest = find_latest_event()
+    if latest is None:
         return None
-    latest = max(candidates, key=lambda x: x["timestamp"])
-    table.delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
+    _table().delete_item(Key={"event_type": latest["event_type"], "timestamp": latest["timestamp"]})
     new_item: dict = {"event_type": latest["event_type"], "timestamp": new_ts}
     if "attribute" in latest:
         new_item["attribute"] = latest["attribute"]
-    table.put_item(Item=new_item)
+    _table().put_item(Item=new_item)
     return {**latest, "timestamp": new_ts}
 
 
 def query_count_today(event_type: str) -> int:
     """Return the number of events of this type since midnight Pacific time today."""
-    resp = table.query(
+    resp = _table().query(
         KeyConditionExpression=(
             Key("event_type").eq(event_type)
             & Key("timestamp").gte(start_of_today_pacific())
@@ -226,18 +249,12 @@ def query_count_today(event_type: str) -> int:
     return resp["Count"]
 
 
-def query_last_n_days(event_type: str, days: int = 30) -> list:
-    """Return all events for this type in the last N days."""
-    cutoff = start_of_n_days_ago_pacific(days)
+def _query_all_pages(key_condition) -> list:
+    """Run a query and follow LastEvaluatedKey until all pages are read."""
     items = []
-    kwargs = dict(
-        KeyConditionExpression=(
-            Key("event_type").eq(event_type)
-            & Key("timestamp").gte(cutoff)
-        ),
-    )
+    kwargs = {"KeyConditionExpression": key_condition}
     while True:
-        resp = table.query(**kwargs)
+        resp = _table().query(**kwargs)
         items.extend(resp.get("Items", []))
         last_key = resp.get("LastEvaluatedKey")
         if not last_key:
@@ -246,9 +263,17 @@ def query_last_n_days(event_type: str, days: int = 30) -> list:
     return items
 
 
+def query_last_n_days(event_type: str, days: int = 30) -> list:
+    """Return all events for this type in the last N days."""
+    cutoff = start_of_n_days_ago_pacific(days)
+    return _query_all_pages(
+        Key("event_type").eq(event_type) & Key("timestamp").gte(cutoff)
+    )
+
+
 def query_last_n_items(event_type: str, n: int) -> list:
     """Return the most recent N events for this type, regardless of age."""
-    resp = table.query(
+    resp = _table().query(
         KeyConditionExpression=Key("event_type").eq(event_type),
         ScanIndexForward=False,
         Limit=n,
@@ -258,13 +283,10 @@ def query_last_n_items(event_type: str, n: int) -> list:
 
 def query_today_events(event_type: str) -> list:
     """Return all event items for this type since midnight Pacific time today."""
-    resp = table.query(
-        KeyConditionExpression=(
-            Key("event_type").eq(event_type)
-            & Key("timestamp").gte(start_of_today_pacific())
-        ),
+    return _query_all_pages(
+        Key("event_type").eq(event_type)
+        & Key("timestamp").gte(start_of_today_pacific())
     )
-    return resp.get("Items", [])
 
 
 def time_since(iso: str) -> str:
@@ -469,10 +491,9 @@ def handle_message(body: str) -> str:
 
     # Last record query
     if any(_contains(body, phrase) for phrase in LAST_RECORD):
-        candidates = [item for et in EVENT_LABELS if (item := query_last(et))]
-        if not candidates:
+        latest = find_latest_event()
+        if latest is None:
             return "No records found."
-        latest = max(candidates, key=lambda x: x["timestamp"])
         past_tense, _ = EVENT_LABELS[latest["event_type"]]
         attr = latest.get("attribute")
         attr_str = f" ({attr})" if attr else ""
@@ -586,10 +607,19 @@ def handle_message(body: str) -> str:
 
 # ── Dashboard data handler ────────────────────────────────────────────────────
 
-def handle_dashboard_data() -> dict:
+def handle_dashboard_data(event: dict) -> dict:
+    # A valid x-dashboard-token unlocks the full payload; anything else
+    # (missing/wrong token, token not configured) degrades to the public view
+    # rather than erroring, so the public dashboard keeps working.
+    token = get_dashboard_token()
+    provided = (event.get("headers") or {}).get("x-dashboard-token", "")
+    authenticated = bool(token) and hmac.compare_digest(token, provided)
+
     all_events = []
     seen = set()
     for event_type in EVENT_LABELS:
+        if not authenticated and event_type in PUBLIC_EXCLUDED_TYPES:
+            continue
         for item in query_last_n_days(event_type, days=30):
             key = (item["event_type"], item["timestamp"])
             if key not in seen:
@@ -599,21 +629,23 @@ def handle_dashboard_data() -> dict:
                     "timestamp": item["timestamp"],
                     "attribute": item.get("attribute"),
                 })
-    for item in query_last_n_items("weight", 5):
-        key = ("weight", item["timestamp"])
-        if key not in seen:
-            seen.add(key)
-            all_events.append({
-                "event_type": item["event_type"],
-                "timestamp": item["timestamp"],
-                "attribute": item.get("attribute"),
-            })
+    if authenticated:
+        for item in query_last_n_items("weight", 5):
+            key = ("weight", item["timestamp"])
+            if key not in seen:
+                seen.add(key)
+                all_events.append({
+                    "event_type": item["event_type"],
+                    "timestamp": item["timestamp"],
+                    "attribute": item.get("attribute"),
+                })
     all_events.sort(key=lambda x: x["timestamp"], reverse=True)
     return {
         "statusCode": 200,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "private, max-age=60",
+            "Vary": "x-dashboard-token",
         },
         "body": json.dumps({"events": all_events, "generated_at": iso_now()}),
     }
@@ -632,7 +664,10 @@ def json_response(message: str, status: int = 200) -> dict:
 def handle_shortcut(event: dict, raw_body: str) -> dict:
     headers = event.get("headers") or {}
     provided_key = headers.get("x-api-key", "")
-    if not API_KEY or not hmac.compare_digest(API_KEY, provided_key):
+    # The `not api_key` guard is load-bearing: compare_digest("", "") is True,
+    # so an unconfigured/unfetchable key must fail closed here.
+    api_key = get_api_key()
+    if not api_key or not hmac.compare_digest(api_key, provided_key):
         return json_response("Unauthorized", status=403)
     try:
         text = json.loads(raw_body).get("text", "").strip()
@@ -640,6 +675,8 @@ def handle_shortcut(event: dict, raw_body: str) -> dict:
         return json_response("Invalid request body", status=400)
     if not text:
         return json_response("Missing 'text' field", status=400)
+    if len(text) > MAX_TEXT_LEN:
+        return json_response("Message too long", status=400)
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "text/plain"},
@@ -654,6 +691,6 @@ def lambda_handler(event: dict, context) -> dict:
 
     route_key = event.get("routeKey", "")
     if route_key == "GET /data":
-        return handle_dashboard_data()
+        return handle_dashboard_data(event)
 
     return handle_shortcut(event, raw_body)

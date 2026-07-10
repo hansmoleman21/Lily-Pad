@@ -176,6 +176,7 @@
 
 <script>
   var API_URL = "${api_url}";
+  var DASH_TOKEN = "${dashboard_token}";
 
   var TYPE_LABELS = {
     pee:        "Pee",
@@ -186,14 +187,12 @@
     walk:       "Walk"
   };
 
-  var TYPE_COLORS = {
-    pee:        "#fbbf24",
-    poop:       "#92400e",
-    vomit:      "#f97316",
-    ate_ground: "#65a30d",
-    note:       "#6366f1",
-    walk:       "#3b82f6"
-  };
+  // Escape server-derived values before interpolating into innerHTML.
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c) {
+      return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c];
+    });
+  }
 
   function pacificMidnightISO(daysAgo) {
     var d = new Date();
@@ -211,26 +210,11 @@
     return d.toLocaleString("en-US", opts);
   }
 
-  function todayPacificLabel() {
-    var d = new Date();
-    var s = d.toLocaleString("en-US", { timeZone: "America/Los_Angeles",
-                                         month: "short", day: "numeric" });
-    return s;
-  }
-
   function dayLabelPacific(daysAgo) {
     var d = new Date();
     d.setDate(d.getDate() - daysAgo);
     return d.toLocaleString("en-US", { timeZone: "America/Los_Angeles",
                                         month: "short", day: "numeric" });
-  }
-
-  function isAfterMidnightPacific(iso, daysAgo) {
-    return iso >= pacificMidnightISO(daysAgo);
-  }
-
-  function isBeforeMidnightPacific(iso, daysAgo) {
-    return daysAgo === 0 || iso < pacificMidnightISO(daysAgo - 1);
   }
 
   function timeSince(iso) {
@@ -293,12 +277,9 @@
     visible.forEach(function(e) {
       var attr = e.attribute || "";
       if (e.event_type === "walk" && attr) attr = attr + " min";
-      var attrHtml = attr ? '<span class="feed-attr">' + attr + '</span>' : '<span class="feed-attr"></span>';
-      if (e.event_type === "note") {
-        attrHtml = '<span class="feed-attr">' + attr + '</span>';
-      }
-      html += '<div class="feed-item ' + e.event_type + '">' +
-              '<span class="feed-type">' + (TYPE_LABELS[e.event_type] || e.event_type) + '</span>' +
+      var attrHtml = '<span class="feed-attr">' + esc(attr) + '</span>';
+      html += '<div class="feed-item ' + esc(e.event_type) + '">' +
+              '<span class="feed-type">' + esc(TYPE_LABELS[e.event_type] || e.event_type) + '</span>' +
               attrHtml +
               '<span class="feed-time">' + formatTS(e.timestamp) + '</span>' +
               '</div>';
@@ -437,7 +418,7 @@
     var html = "";
     noteEvents.forEach(function(e) {
       html += '<div class="note-item">' +
-              '<div class="note-text">' + (e.attribute || "") + '</div>' +
+              '<div class="note-text">' + esc(e.attribute) + '</div>' +
               '<div class="note-time">' + formatTS(e.timestamp) + '</div>' +
               '</div>';
     });
@@ -490,13 +471,14 @@
 
   async function loadData() {
     try {
-      var resp = await fetch(API_URL);
+      var resp = await fetch(API_URL, { headers: { "x-dashboard-token": DASH_TOKEN } });
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       var data = await resp.json();
       render(data);
     } catch (err) {
-      document.getElementById("generated-at").innerHTML =
-        '<span class="error">Error loading data: ' + err.message + '</span>';
+      var el = document.getElementById("generated-at");
+      el.className = "error";
+      el.textContent = "Error loading data: " + err.message;
     }
   }
 
