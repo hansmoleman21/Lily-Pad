@@ -2,6 +2,7 @@
 
 import base64
 import json
+import time
 
 
 def make_event(route_key, body=None, headers=None, b64=False):
@@ -78,38 +79,55 @@ class TestDashboardData:
         h.record_event("medicine", "1 pill")
         h.record_event("weight", "12.5")
 
-    def _get_data(self, h, token=None):
-        headers = {"x-dashboard-token": token} if token is not None else {}
-        resp = h.lambda_handler(make_event("GET /data", headers=headers), None)
-        assert resp["statusCode"] == 200
-        types = {e["event_type"] for e in json.loads(resp["body"])["events"]}
-        return resp, types
+    def _get(self, h, authorization=None):
+        headers = {"authorization": authorization} if authorization is not None else {}
+        return h.lambda_handler(make_event("GET /data", headers=headers), None)
 
-    def test_valid_token_gets_full_payload(self, events_table, dashboard_token):
+    def _types(self, resp):
+        assert resp["statusCode"] == 200
+        return {e["event_type"] for e in json.loads(resp["body"])["events"]}
+
+    def test_valid_token_gets_full_payload(self, events_table, okta_token):
         self._seed(events_table)
-        _, types = self._get_data(events_table, token=dashboard_token)
+        types = self._types(self._get(events_table, "Bearer " + okta_token()))
         assert {"pee", "note", "medicine", "weight"} <= types
 
-    def test_no_token_gets_public_payload(self, events_table, dashboard_token):
+    def test_no_header_gets_public_payload(self, events_table, okta_token):
         self._seed(events_table)
-        _, types = self._get_data(events_table)
+        types = self._types(self._get(events_table))
         assert "pee" in types
         assert types.isdisjoint({"note", "medicine", "weight"})
 
-    def test_wrong_token_gets_public_payload(self, events_table, dashboard_token):
+    def test_expired_token_is_401(self, events_table, okta_token):
+        # Regression: an expired token used to silently get the public payload,
+        # so the private dashboard never knew to send the user back to Okta.
         self._seed(events_table)
-        _, types = self._get_data(events_table, token="wrong-token")
-        assert types.isdisjoint({"note", "medicine", "weight"})
+        resp = self._get(events_table, "Bearer " + okta_token(exp=int(time.time()) - 60))
+        assert resp["statusCode"] == 401
 
-    def test_unconfigured_token_gets_public_payload(self, events_table):
-        # No DASHBOARD_TOKEN_SSM_PATH set: even an empty provided token must
-        # not unlock the full payload (compare_digest("", "") pitfall).
+    def test_wrong_client_id_is_401(self, events_table, okta_token):
+        resp = self._get(events_table, "Bearer " + okta_token(cid="0oa-some-other-app"))
+        assert resp["statusCode"] == 401
+
+    def test_wrong_issuer_is_401(self, events_table, okta_token):
+        resp = self._get(events_table, "Bearer " + okta_token(iss="https://evil.test"))
+        assert resp["statusCode"] == 401
+
+    def test_garbage_token_is_401(self, events_table, okta_token):
+        resp = self._get(events_table, "Bearer not-a-jwt")
+        assert resp["statusCode"] == 401
+
+    def test_non_bearer_scheme_is_401(self, events_table, okta_token):
+        resp = self._get(events_table, "Basic dXNlcjpwYXNz")
+        assert resp["statusCode"] == 401
+
+    def test_401_does_not_leak_private_data(self, events_table, okta_token):
         self._seed(events_table)
-        _, types = self._get_data(events_table, token="")
-        assert types.isdisjoint({"note", "medicine", "weight"})
+        resp = self._get(events_table, "Bearer " + okta_token(exp=int(time.time()) - 60))
+        assert "secret vet note" not in resp["body"]
 
-    def test_response_headers(self, events_table, dashboard_token):
-        resp, _ = self._get_data(events_table)
+    def test_response_headers(self, events_table, okta_token):
+        resp = self._get(events_table)
         assert resp["headers"]["Cache-Control"] == "private, max-age=60"
-        assert resp["headers"]["Vary"] == "x-dashboard-token"
+        assert resp["headers"]["Vary"] == "Authorization"
         assert "Access-Control-Allow-Origin" not in resp["headers"]

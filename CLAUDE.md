@@ -25,10 +25,10 @@ Dashboard HTML → S3 (private) → CloudFront (HTTPS)
 - **`lambda/phrases.py`** — All trigger phrases for recording and querying events. Edit here to
   add voice-to-text aliases or new event types.
 - **`dashboard/index.html.tpl`, `dashboard/public.html.tpl`** — Dashboard templates. Terraform
-  renders them with the `/data` URL (and, for the private page, the dashboard token) and
+  renders them with the `/data` URL (and, for the private page, the Okta client ID) and
   uploads them to S3 (served via CloudFront). The public dashboard is the CloudFront root;
-  the private page (token embedded) is served at an unguessable path,
-  `lily-<random_id>.html` — get it with `terraform output -raw private_dashboard_url`. All
+  the private page (Okta OIDC login, PKCE via `okta-auth-js`) is served at `/index.html` —
+  `terraform output private_dashboard_url`. All
   server-derived values are HTML-escaped via `esc()` before hitting `innerHTML`.
 - **`terraform/`** — All AWS infrastructure: DynamoDB table, Lambda, API Gateway v2 (`/log`
   and `/data` routes, CORS locked to the CloudFront origin), IAM roles, CloudWatch log groups
@@ -48,21 +48,24 @@ Table: `lily-events`
 
 ### Secret handling
 
-Two secrets live in SSM Parameter Store as SecureStrings, both created manually (never
-Terraform-managed, so they don't pass through tfvars or state):
+The Shortcuts API key lives in SSM Parameter Store as a SecureString, created manually (never
+Terraform-managed, so it doesn't pass through tfvars or state):
 
 - `/lily-pad/shortcuts-api-key` — validated on `POST /log` (`x-api-key` header). If
   `API_KEY_SSM_PATH` is unset or the fetch fails, **all `/log` requests are rejected**
-  (fail-closed).
-- `/lily-pad/dashboard-token` — sent by the private dashboard as `x-dashboard-token`. A valid
-  token unlocks the full `GET /data` payload; anything else gets a public payload with
-  `note`/`medicine`/`weight` withheld (`PUBLIC_EXCLUDED_TYPES`), so the public dashboard keeps
-  working without a token.
+  (fail-closed). Lambda fetches it once per container (`get_api_key()`, `lru_cache`d over
+  `_fetch_ssm_secret`). The `not api_key` guard is load-bearing: `hmac.compare_digest("", "")`
+  is `True`, so an empty configured secret must never compare successfully.
 
-Lambda fetches each once per container (`get_api_key()` / `get_dashboard_token()`, both
-`lru_cache`d over `_fetch_ssm_secret`); neither value appears in Lambda env vars in plaintext.
-Note the `not api_key` / `bool(token)` guards are load-bearing: `hmac.compare_digest("", "")`
-is `True`, so an empty configured secret must never compare successfully.
+`GET /data` is tiered by Okta access token (`validate_okta_token()` checks signature via
+`OKTA_JWKS_URL`, `iss` == `OKTA_ISSUER`, expiry, and `cid` == `OKTA_CLIENT_ID`):
+
+- **No `Authorization` header** → 200 with the public payload (`note`/`medicine`/`weight`
+  withheld via `PUBLIC_EXCLUDED_TYPES`). This is what the public dashboard gets.
+- **Valid bearer token** → 200 with the full payload.
+- **Header present but invalid/expired** → **401**. Deliberately *not* a silent fallback to the
+  public payload: the private dashboard relies on the 401 to send the user back to Okta.
+  The rejection reason (exception class only, never the token) is logged to CloudWatch.
 
 ### Phrase matching
 
@@ -80,7 +83,7 @@ handled automatically — no manual offset to update.
 ## Deploy / Teardown
 
 Full one-time setup (AWS account, MFA, CLI profile, tfenv, S3 state bucket, and creating the
-`/lily-pad/shortcuts-api-key` and `/lily-pad/dashboard-token` SSM parameters) is documented in
+`/lily-pad/shortcuts-api-key` SSM parameter) is documented in
 `README.md`. No tfvars file is needed. Once that's done:
 
 ```bash

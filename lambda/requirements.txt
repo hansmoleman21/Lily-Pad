@@ -1,0 +1,6 @@
+# Lambda runtime dependencies — pinned exactly (including transitive deps) so
+# CI and local builds produce the same package.
+pyjwt==2.15.0
+cryptography==50.0.1
+cffi==2.1.1
+pycparser==3.0

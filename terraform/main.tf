@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
-    }
   }
 
   backend "s3" {
@@ -25,15 +21,10 @@ provider "aws" {
 }
 
 # ── Secrets (SSM Parameter Store) ────────────────────────────────────────────
-# Both secrets are SecureString parameters created manually (see README):
-#   /lily-pad/shortcuts-api-key — validated on POST /log
-#   /lily-pad/dashboard-token   — unlocks the full GET /data payload
-# They are managed outside Terraform so their values never pass through
-# terraform.tfvars or get created from state.
-
-data "aws_ssm_parameter" "dashboard_token" {
-  name = "/lily-pad/dashboard-token"
-}
+# /lily-pad/shortcuts-api-key (validated on POST /log) is a SecureString
+# parameter created manually (see README). It is managed outside Terraform so
+# its value never passes through terraform.tfvars or state; the Lambda reads it
+# at runtime. GET /data is protected by Okta login instead of a secret.
 
 # ── DynamoDB ──────────────────────────────────────────────────────────────────
 
@@ -60,12 +51,13 @@ resource "aws_dynamodb_table" "lily_events" {
 }
 
 # ── Lambda ────────────────────────────────────────────────────────────────────
-# Zip the entire lambda/ directory so that phrases.py is included alongside
-# handler.py. Output goes to terraform/ to keep it outside the source dir.
+# Zip lambda/build/ (produced by lambda/build.sh: handler.py, phrases.py, and
+# pinned Linux wheels). Run build.sh before plan/apply. Output goes to
+# terraform/ to keep it outside the source dir.
 
 data "archive_file" "lambda_zip" {
   type        = "zip"
-  source_dir  = "${path.module}/../lambda"
+  source_dir  = "${path.module}/../lambda/build"
   output_path = "${path.module}/lambda_package.zip"
 }
 
@@ -81,9 +73,11 @@ resource "aws_lambda_function" "lily_pad" {
 
   environment {
     variables = {
-      DYNAMODB_TABLE           = aws_dynamodb_table.lily_events.name
-      API_KEY_SSM_PATH         = "/lily-pad/shortcuts-api-key"
-      DASHBOARD_TOKEN_SSM_PATH = "/lily-pad/dashboard-token"
+      DYNAMODB_TABLE   = aws_dynamodb_table.lily_events.name
+      API_KEY_SSM_PATH = "/lily-pad/shortcuts-api-key"
+      OKTA_CLIENT_ID   = var.okta_dashboard_client_id
+      OKTA_ISSUER      = "https://integrator-3224668.okta.com"
+      OKTA_JWKS_URL    = "https://integrator-3224668.okta.com/oauth2/v1/keys"
     }
   }
 
@@ -109,13 +103,13 @@ resource "aws_apigatewayv2_api" "lily_pad" {
   name          = "lily-pad"
   protocol_type = "HTTP"
 
-  # The x-dashboard-token header makes dashboard fetches non-simple requests,
+  # The Authorization header makes dashboard fetches non-simple requests,
   # so the browser preflights them; HTTP APIs answer OPTIONS automatically
   # when this block is set. Only the CloudFront origin is allowed.
   cors_configuration {
     allow_origins = ["https://${aws_cloudfront_distribution.dashboard.domain_name}"]
     allow_methods = ["GET", "POST"]
-    allow_headers = ["content-type", "x-api-key", "x-dashboard-token"]
+    allow_headers = ["content-type", "x-api-key", "authorization"]
     max_age       = 3600
   }
 
@@ -211,7 +205,7 @@ resource "aws_cloudfront_response_headers_policy" "dashboard" {
       # connect-src uses a region wildcard on purpose: referencing the API
       # endpoint here would create a dependency cycle (API CORS needs the
       # CloudFront domain, CloudFront needs this policy).
-      content_security_policy = "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src 'self'; connect-src https://*.execute-api.${var.aws_region}.amazonaws.com; base-uri 'none'; frame-ancestors 'none'"
+      content_security_policy = "default-src 'none'; script-src 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'unsafe-inline'; img-src 'self'; connect-src https://*.execute-api.${var.aws_region}.amazonaws.com https://integrator-3224668.okta.com; base-uri 'none'; frame-ancestors 'none'"
       override                = true
     }
   }
@@ -312,20 +306,12 @@ resource "aws_s3_object" "dashboard_image" {
   etag         = filemd5("${path.module}/../dashboard/Lily-and-DC.PNG")
 }
 
-# The private dashboard embeds the dashboard token, so it must not live at a
-# guessable path. It is served under a random key (stable across applies, kept
-# in state); the public dashboard is the CloudFront root instead.
-resource "random_id" "private_page" {
-  byte_length = 8
-}
-
 locals {
-  private_page_key = "lily-${random_id.private_page.hex}.html"
-  data_url         = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+  data_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
 
   index_html = templatefile("${path.module}/../dashboard/index.html.tpl", {
-    api_url         = local.data_url
-    dashboard_token = data.aws_ssm_parameter.dashboard_token.value
+    api_url        = local.data_url
+    okta_client_id = var.okta_dashboard_client_id
   })
 
   public_html = templatefile("${path.module}/../dashboard/public.html.tpl", {
@@ -335,7 +321,7 @@ locals {
 
 resource "aws_s3_object" "dashboard_html" {
   bucket       = aws_s3_bucket.dashboard.id
-  key          = local.private_page_key
+  key          = "index.html"
   content_type = "text/html"
   content      = local.index_html
   etag         = md5(local.index_html)
