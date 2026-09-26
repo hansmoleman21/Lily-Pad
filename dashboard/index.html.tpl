@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lily Pad Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@okta/okta-auth-js@8.0.1/umd/default.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -176,7 +177,49 @@
 
 <script>
   var API_URL = "${api_url}";
-  var DASH_TOKEN = "${dashboard_token}";
+  var OKTA_CLIENT_ID = "${okta_client_id}";
+
+  var OKTA_ISSUER = "https://integrator-3224668.okta.com";
+
+  var OktaAuthCtor = (window.OktaAuth && window.OktaAuth.OktaAuth) || window.OktaAuth;
+  var authClient = new OktaAuthCtor({
+    issuer: OKTA_ISSUER,
+    clientId: OKTA_CLIENT_ID,
+    redirectUri: window.location.origin + window.location.pathname,
+    scopes: ["openid", "profile"],
+    pkce: true
+  });
+
+  // True when this page load is the return trip from Okta. Used as a loop
+  // guard: if a token we *just* got is still rejected, stop and show an error
+  // rather than bouncing back to Okta forever.
+  var justLoggedIn = false;
+
+  async function redirectToLogin() {
+    // Clear stale tokens first. If the Okta session is still alive, Okta sends
+    // the user straight back without a password prompt.
+    authClient.tokenManager.clear();
+    await authClient.token.getWithRedirect({ responseType: ["code"] });
+  }
+
+  async function getAccessToken() {
+    // Returning from Okta with ?code=... — exchange it and clean up the URL.
+    if (authClient.isLoginRedirect()) {
+      var res = await authClient.token.parseFromUrl();
+      authClient.tokenManager.setTokens(res.tokens);
+      window.history.replaceState({}, document.title, window.location.pathname);
+      justLoggedIn = true;
+    }
+    // tokenManager.get() returns stored tokens even after they expire (the SDK
+    // only auto-renews when authClient.start() is running), so check expiry.
+    var token = await authClient.tokenManager.get("accessToken");
+    if (!token || authClient.tokenManager.hasExpired(token)) {
+      // No valid session — send the user to Okta. Page stops here.
+      await redirectToLogin();
+      return null;
+    }
+    return token.accessToken;
+  }
 
   var TYPE_LABELS = {
     pee:        "Pee",
@@ -471,7 +514,15 @@
 
   async function loadData() {
     try {
-      var resp = await fetch(API_URL, { headers: { "x-dashboard-token": DASH_TOKEN } });
+      var accessToken = await getAccessToken();
+      if (!accessToken) return;   // redirecting to Okta; nothing more to do
+      var resp = await fetch(API_URL, { headers: { "Authorization": "Bearer " + accessToken } });
+      if (resp.status === 401) {
+        // Server rejected the token (revoked, clock skew, key rotation, ...).
+        if (justLoggedIn) throw new Error("login succeeded but the API rejected the token (check OKTA_CLIENT_ID / OKTA_ISSUER)");
+        await redirectToLogin();
+        return;
+      }
       if (!resp.ok) throw new Error("HTTP " + resp.status);
       var data = await resp.json();
       render(data);

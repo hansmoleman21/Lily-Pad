@@ -3,16 +3,18 @@ Lily Pad — Lambda handler
 
 Routes:
   POST /log  — Apple Shortcuts (API key validation, JSON response)
-  GET  /data — Dashboard data. A valid x-dashboard-token header gets the full
-               payload; otherwise a reduced public payload is served.
+  GET  /data — Dashboard data. A valid Okta access token (Authorization: Bearer)
+               gets the full payload; no Authorization header gets a reduced
+               public payload; an invalid/expired token gets 401.
 
 Environment variables
 ---------------------
 DYNAMODB_TABLE           : DynamoDB table name (lily-events)
 API_KEY_SSM_PATH         : SSM path for the Shortcuts API key. If unset or the
                            fetch fails, all POST /log requests are rejected.
-DASHBOARD_TOKEN_SSM_PATH : SSM path for the dashboard token. If unset or the
-                           fetch fails, GET /data serves only the public payload.
+OKTA_ISSUER              : Okta org issuer URL; token `iss` must match.
+OKTA_CLIENT_ID           : lily-pad-dashboard app client ID; token `cid` must match.
+OKTA_JWKS_URL            : Okta JWKS endpoint used to verify token signatures.
 """
 
 import base64
@@ -27,6 +29,8 @@ from typing import Optional, Tuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
+import jwt
+from jwt import PyJWKClient
 
 from phrases import RECORD, QUERY, SUMMARY, DAILY_SUMMARY, DELETE, NOTE_PREFIX, WALK_PREFIX, MEDICINE_PREFIX, CHANGE_TIME, WEIGHT_PREFIX, WEIGHT_QUERY, LAST_RECORD, GROOMING_QUERY
 
@@ -67,10 +71,31 @@ def _fetch_ssm_secret(path: str) -> str:
 def get_api_key() -> str:
     return _fetch_ssm_secret(os.environ.get("API_KEY_SSM_PATH", ""))
 
+_JWK_CLIENT = None
 
-@functools.lru_cache(maxsize=None)
-def get_dashboard_token() -> str:
-    return _fetch_ssm_secret(os.environ.get("DASHBOARD_TOKEN_SSM_PATH", ""))
+def _jwk_client() -> PyJWKClient:
+    """Okta JWKS client, created lazily (once per Lambda container)."""
+    global _JWK_CLIENT
+    if _JWK_CLIENT is None:
+        _JWK_CLIENT = PyJWKClient(os.environ.get("OKTA_JWKS_URL", ""), cache_keys=True)
+    return _JWK_CLIENT
+
+
+def validate_okta_token(auth_header: str) -> bool:
+    if not auth_header.startswith("Bearer "):
+        return False
+    token = auth_header.removeprefix("Bearer ")
+    try:
+        signing_key = _jwk_client().get_signing_key_from_jwt(token)
+        claims = jwt.decode(
+            token, signing_key.key, algorithms=["RS256"],
+            issuer=os.environ.get("OKTA_ISSUER", ""), options={"verify_aud": False},
+        )
+    except jwt.PyJWTError as e:
+        # Log the reason only — never the token itself.
+        print(f"WARN: Okta token rejected: {type(e).__name__}")
+        return False
+    return claims.get("cid") == os.environ.get("OKTA_CLIENT_ID", "")
 
 # ── Event display labels ──────────────────────────────────────────────────────
 
@@ -608,12 +633,14 @@ def handle_message(body: str) -> str:
 # ── Dashboard data handler ────────────────────────────────────────────────────
 
 def handle_dashboard_data(event: dict) -> dict:
-    # A valid x-dashboard-token unlocks the full payload; anything else
-    # (missing/wrong token, token not configured) degrades to the public view
-    # rather than erroring, so the public dashboard keeps working.
-    token = get_dashboard_token()
-    provided = (event.get("headers") or {}).get("x-dashboard-token", "")
-    authenticated = bool(token) and hmac.compare_digest(token, provided)
+    # No Authorization header → public payload (the public dashboard sends
+    # none). A header that's present but invalid/expired → 401, so the private
+    # dashboard knows to send the user back to Okta instead of silently
+    # rendering the public view.
+    auth_header = (event.get("headers") or {}).get("authorization", "")
+    authenticated = bool(auth_header) and validate_okta_token(auth_header)
+    if auth_header and not authenticated:
+        return json_response("invalid or expired token", 401)
 
     all_events = []
     seen = set()
@@ -645,7 +672,7 @@ def handle_dashboard_data(event: dict) -> dict:
         "headers": {
             "Content-Type": "application/json",
             "Cache-Control": "private, max-age=60",
-            "Vary": "x-dashboard-token",
+            "Vary": "Authorization",
         },
         "body": json.dumps({"events": all_events, "generated_at": iso_now()}),
     }

@@ -72,19 +72,13 @@ Credentials are valid for 8 hours. Unset them when done:
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 ```
 
-### 7. Create SSM parameters (one-time, before terraform apply)
+### 7. Create the SSM parameter (one-time, before terraform apply)
 
-All secrets are stored in SSM Parameter Store — nothing sensitive goes in source code, `tfvars`, or Terraform-managed resources. Generate a random value for each (`openssl rand -hex 32`) and store it:
+The Shortcuts API key is stored in SSM Parameter Store — nothing sensitive goes in source code, `tfvars`, or Terraform-managed resources. Generate a random value and store it:
 
 ```bash
 aws ssm put-parameter \
   --name "/lily-pad/shortcuts-api-key" \
-  --value "$(openssl rand -hex 32)" \
-  --type SecureString \
-  --region us-west-2
-
-aws ssm put-parameter \
-  --name "/lily-pad/dashboard-token" \
   --value "$(openssl rand -hex 32)" \
   --type SecureString \
   --region us-west-2
@@ -93,7 +87,11 @@ aws ssm put-parameter \
 | Parameter | Description |
 |---|---|
 | `/lily-pad/shortcuts-api-key` | API key for the Apple Shortcuts `/log` endpoint |
-| `/lily-pad/dashboard-token` | Token baked into the private dashboard; unlocks the full `/data` payload (notes, medicine, weight) |
+
+The private dashboard needs no secret: it uses Okta login (an OIDC single-page app, PKCE, no
+client secret). Create the `lily-pad-dashboard` SPA app in Okta with sign-in redirect URI
+`https://<cloudfront-domain>/index.html`, and pass its client ID to Terraform as
+`okta_dashboard_client_id` (e.g. in the gitignored `terraform/terraform.tfvars`).
 
 Retrieve a value later (e.g. for the Apple Shortcut header):
 
@@ -102,14 +100,15 @@ aws ssm get-parameter --name "/lily-pad/shortcuts-api-key" \
   --with-decryption --query Parameter.Value --output text --region us-west-2
 ```
 
-To rotate either secret: `aws ssm put-parameter --overwrite` with a new value, update the
-`x-api-key` header in your Apple Shortcuts (for the shortcuts key), then re-run
+To rotate the key: `aws ssm put-parameter --overwrite` with a new value, update the
+`x-api-key` header in your Apple Shortcuts, then re-run
 `terraform apply` so new Lambda containers pick it up (any code/config change forces this;
 otherwise wait for containers to recycle or update the function config manually).
 
 ### 8. Deploy
 
 ```bash
+lambda/build.sh          # packages handler + pinned deps into lambda/build/
 cd terraform
 terraform init
 terraform apply
