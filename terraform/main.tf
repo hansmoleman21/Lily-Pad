@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.11" # S3-native state locking (use_lockfile)
 
   required_providers {
     aws = {
@@ -9,10 +9,11 @@ terraform {
   }
 
   backend "s3" {
-    bucket  = "lily-pad-terraform-state-us-west-2"
-    key     = "lily-pad/terraform.tfstate"
-    region  = "us-west-2"
-    encrypt = true
+    bucket       = "lily-pad-terraform-state-us-west-2"
+    key          = "lily-pad/terraform.tfstate"
+    region       = "us-west-2"
+    encrypt      = true
+    use_lockfile = true # lock via a .tflock object so CI and laptop can't apply concurrently
   }
 }
 
