@@ -1,0 +1,120 @@
+name: Terraform
+
+# PRs: test + plan (read-only role). Merge to main: test + plan, then apply —
+# which waits for manual approval in the "production" environment.
+
+on:
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "lambda/**"
+      - "dashboard/**"
+      - "tests/**"
+      - "requirements-dev.txt"
+      - "pytest.ini"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "terraform/**"
+      - "lambda/**"
+      - "dashboard/**"
+      - "tests/**"
+      - "requirements-dev.txt"
+      - "pytest.ini"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  TF_VERSION: "1.14.6" # match `terraform version` locally
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_VAR_okta_dashboard_client_id: ${{ vars.TF_VAR_OKTA_DASHBOARD_CLIENT_ID }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12" # Lambda runtime
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pytest
+
+  plan:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # request the GitHub OIDC token for AWS
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_PLAN_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Build Lambda package
+        run: ../lambda/build.sh
+
+      - run: terraform fmt -check -recursive
+      - name: Validate bootstrap root (no backend, no AWS calls)
+        run: terraform -chdir=bootstrap init -backend=false && terraform -chdir=bootstrap validate
+      - run: terraform init
+      - run: terraform validate
+      # -lock=false: the plan role is read-only and can't write the .tflock
+      # object. A plan never changes state, so skipping the lock is safe.
+      - run: terraform plan -lock=false -no-color
+
+  apply:
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Required reviewer + main-only deployment branch are configured on this
+    # environment in repo settings. Using it also sets the OIDC sub claim to
+    # repo:<owner>/<repo>:environment:production, which is the only sub the
+    # apply role trusts.
+    environment: production
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ vars.AWS_APPLY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Build Lambda package
+        run: ../lambda/build.sh
+
+      - run: terraform init
+      # Re-plan here rather than download the plan job's file: on a public
+      # repo, an uploaded plan artifact could expose rendered values.
+      - run: terraform plan -no-color -out=tfplan
+      - run: terraform apply tfplan

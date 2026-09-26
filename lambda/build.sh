@@ -16,3 +16,9 @@ python3 -m pip install \
   --quiet \
   --target build \
   -r requirements.txt
+
+# Drop files that embed the build machine's interpreter path, so the package is
+# identical on a laptop and a CI runner: console scripts (bin/) have a shebang
+# like #!/path/to/python3, and each dist-info RECORD lists those scripts' hashes.
+# Lambda never runs these scripts; RECORD is only used by `pip uninstall`.
+rm -rf build/bin build/*.dist-info/RECORD
