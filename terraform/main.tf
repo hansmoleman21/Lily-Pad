@@ -340,6 +340,8 @@ resource "aws_s3_object" "dashboard_html" {
   content_type = "text/html"
   content      = local.index_html
   etag         = md5(local.index_html)
+  cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
+
 }
 
 resource "aws_s3_object" "dashboard_html_public" {
@@ -348,4 +350,5 @@ resource "aws_s3_object" "dashboard_html_public" {
   content_type = "text/html"
   content      = local.public_html
   etag         = md5(local.public_html)
+  cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
 }
