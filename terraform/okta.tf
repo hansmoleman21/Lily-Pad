@@ -1,10 +1,4 @@
-# Okta resources managed by Terraform. The dashboard app was built by hand in
-# Part 1 and is imported here; delete this import block after the apply.
-
-import {
-  to = okta_app_oauth.lily_pad_dashboard
-  id = "0oa17mfxictemtIDi698" # for OIDC apps, app ID = client ID
-}
+# Okta resources managed by Terraform. 
 
 resource "okta_app_oauth" "lily_pad_dashboard" {
   label                      = "Lily Pad Dashboard"
@@ -27,4 +21,20 @@ resource "okta_app_oauth" "lily_pad_dashboard" {
   # The app's sign-on (authentication) policy, assigned in the console. Without
   # this line, the provider would switch the app to the org's default policy.
   authentication_policy = "rst17ligvfe01uo9E698"
+}
+
+# Who may sign in to the dashboard. Membership is managed in Okta (like the AWS
+# push groups); Terraform owns the group and the app assignment.
+resource "okta_group" "lily_pad_dashboard_users" {
+  name        = "lily-pad-dashboard-users"
+  description = "Can sign in to the Lily Pad private dashboard"
+}
+
+# Owns the app's entire set of group assignments. Any group assigned by hand
+# and not listed here would be removed.
+resource "okta_app_group_assignments" "lily_pad_dashboard" {
+  app_id = okta_app_oauth.lily_pad_dashboard.id
+  group {
+    id = okta_group.lily_pad_dashboard_users.id
+  }
 }
