@@ -90,7 +90,7 @@ resource "aws_lambda_function" "lily_pad" {
     variables = {
       DYNAMODB_TABLE   = aws_dynamodb_table.lily_events.name
       API_KEY_SSM_PATH = "/lily-pad/shortcuts-api-key"
-      OKTA_CLIENT_ID   = var.okta_dashboard_client_id
+      OKTA_CLIENT_ID   = okta_app_oauth.lily_pad_dashboard.client_id
       OKTA_ISSUER      = "https://integrator-3224668.okta.com"
       OKTA_JWKS_URL    = "https://integrator-3224668.okta.com/oauth2/v1/keys"
     }
@@ -326,7 +326,7 @@ locals {
 
   index_html = templatefile("${path.module}/../dashboard/index.html.tpl", {
     api_url        = local.data_url
-    okta_client_id = var.okta_dashboard_client_id
+    okta_client_id = okta_app_oauth.lily_pad_dashboard.client_id
   })
 
   public_html = templatefile("${path.module}/../dashboard/public.html.tpl", {

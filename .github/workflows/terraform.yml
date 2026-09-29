@@ -32,7 +32,6 @@ env:
   TF_VERSION: "1.14.6" # match `terraform version` locally
   TF_IN_AUTOMATION: "true"
   TF_INPUT: "false"
-  TF_VAR_okta_dashboard_client_id: ${{ vars.TF_VAR_OKTA_DASHBOARD_CLIENT_ID }}
 
 jobs:
   test:
