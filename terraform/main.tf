@@ -335,20 +335,20 @@ locals {
 }
 
 resource "aws_s3_object" "dashboard_html" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "index.html"
-  content_type = "text/html"
-  content      = local.index_html
-  etag         = md5(local.index_html)
+  bucket        = aws_s3_bucket.dashboard.id
+  key           = "index.html"
+  content_type  = "text/html"
+  content       = local.index_html
+  etag          = md5(local.index_html)
   cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
 
 }
 
 resource "aws_s3_object" "dashboard_html_public" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "public.html"
-  content_type = "text/html"
-  content      = local.public_html
-  etag         = md5(local.public_html)
+  bucket        = aws_s3_bucket.dashboard.id
+  key           = "public.html"
+  content_type  = "text/html"
+  content       = local.public_html
+  etag          = md5(local.public_html)
   cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
 }
