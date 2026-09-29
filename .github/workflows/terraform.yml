@@ -51,6 +51,11 @@ jobs:
     permissions:
       contents: read
       id-token: write # request the GitHub OIDC token for AWS
+    env:
+      OKTA_API_CLIENT_ID: ${{ vars.OKTA_PLAN_CLIENT_ID }}
+      OKTA_API_PRIVATE_KEY_ID: ${{ vars.OKTA_PLAN_KEY_ID }}
+      OKTA_API_PRIVATE_KEY: ${{ secrets.OKTA_PLAN_PRIVATE_KEY }}
+      OKTA_API_SCOPES: okta.apps.read,okta.groups.read
     defaults:
       run:
         working-directory: terraform
@@ -94,6 +99,11 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      OKTA_API_CLIENT_ID: ${{ vars.OKTA_APPLY_CLIENT_ID }}
+      OKTA_API_PRIVATE_KEY_ID: ${{ vars.OKTA_APPLY_KEY_ID }}
+      OKTA_API_PRIVATE_KEY: ${{ secrets.OKTA_APPLY_PRIVATE_KEY }}
+      OKTA_API_SCOPES: okta.apps.read,okta.apps.manage,okta.groups.read,okta.groups.manage
     defaults:
       run:
         working-directory: terraform

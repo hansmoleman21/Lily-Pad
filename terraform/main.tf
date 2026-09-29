@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.7"
     }
+    okta = {
+      source  = "okta/okta"
+      version = "~> 7.0"
+    }
   }
 
   backend "s3" {
@@ -23,6 +27,12 @@ terraform {
 
 provider "aws" {
   region = var.aws_region
+}
+provider "okta" {
+  org_name = "integrator-3224668" # non-admin host
+  base_url = "okta.com"
+  # client_id / private_key_id / private_key / scopes come from
+  # OKTA_API_CLIENT_ID, OKTA_API_PRIVATE_KEY_ID, OKTA_API_PRIVATE_KEY, OKTA_API_SCOPES
 }
 
 # ── Secrets (SSM Parameter Store) ────────────────────────────────────────────
