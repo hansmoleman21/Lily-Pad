@@ -1,6 +1,6 @@
 # Okta resources managed by Terraform. 
 
-resource "okta_app_oauth" "lily_pad_dashboard" {
+resource "okta_app_oauth" "dashboard" {
   label                      = "Lily Pad Dashboard"
   type                       = "browser"
   grant_types                = ["authorization_code"]
@@ -33,7 +33,7 @@ resource "okta_group" "lily_pad_dashboard_users" {
 # Owns the app's entire set of group assignments. Any group assigned by hand
 # and not listed here would be removed.
 resource "okta_app_group_assignments" "lily_pad_dashboard" {
-  app_id = okta_app_oauth.lily_pad_dashboard.id
+  app_id = okta_app_oauth.dashboard.id
   group {
     id = okta_group.lily_pad_dashboard_users.id
   }
