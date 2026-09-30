@@ -45,6 +45,10 @@ Table: `lily-events`
 - Sort key: `timestamp` (String, ISO 8601 UTC)
 - Optional attribute: `attribute` — meaning varies by event type (e.g. `normal`/`soft`/`diarrhea`
   for poop, walk duration in minutes, weight in lbs, free-form text for notes/medicine)
+- Protected by `lifecycle { prevent_destroy = true }`, deletion protection, and
+  point-in-time recovery (35 days). `terraform destroy` or any change that forces table
+  replacement fails at plan time. Never remove those guards casually; flag it before proposing
+  a table replacement. Teardown and restore steps are in `README.md`.
 
 ### Secret handling
 
@@ -90,7 +94,7 @@ Full one-time setup (AWS account, MFA, CLI profile, tfenv, S3 state bucket, and 
 cd terraform
 terraform init
 terraform apply    # deploys everything; prints log_url
-terraform destroy  # tears down all AWS resources
+terraform destroy  # tears down all AWS resources (first lift the DynamoDB guards; see README)
 ```
 
 Terraform zips `lambda/` automatically (via `archive_file`) — no manual packaging step.
