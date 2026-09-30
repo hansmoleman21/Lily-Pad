@@ -105,9 +105,15 @@ class TestDashboardData:
         resp = self._get(events_table, "Bearer " + okta_token(exp=int(time.time()) - 60))
         assert resp["statusCode"] == 401
 
-    def test_wrong_client_id_is_401(self, events_table, okta_token):
-        resp = self._get(events_table, "Bearer " + okta_token(cid="0oa-some-other-app"))
+    def test_wrong_client_id_is_401(self, events_table, okta_token, capsys):
+        token = okta_token(cid="0oa-some-other-app")
+        resp = self._get(events_table, "Bearer " + token)
         assert resp["statusCode"] == 401
+        # Regression: a cid mismatch (e.g. a token from a rebuilt app) was
+        # rejected silently, so a credential rotation left no trace in CloudWatch.
+        out = capsys.readouterr().out
+        assert "Okta token rejected: cid mismatch" in out
+        assert token not in out
 
     def test_wrong_issuer_is_401(self, events_table, okta_token):
         resp = self._get(events_table, "Bearer " + okta_token(iss="https://evil.test"))
