@@ -60,8 +60,23 @@ resource "aws_dynamodb_table" "lily_events" {
     type = "S"
   }
 
+  # Guard against accidental loss: AWS refuses DeleteTable while this is on
+  # (turn it off and drop prevent_destroy below for a deliberate teardown), and
+  # PITR keeps 35 days of restorable history plus a system backup if deleted.
+  deletion_protection_enabled = true
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
   tags = {
     Project = "lily-pad"
+  }
+
+  # Terraform-side guard: any plan that would destroy or replace this table
+  # fails before touching AWS. Deletion protection covers non-Terraform deletes.
+  lifecycle {
+    prevent_destroy = true
   }
 }
 

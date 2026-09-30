@@ -172,6 +172,36 @@ Send any phrase below as the `text` field in a POST to `/log`.
 Phrases are matched case-insensitively as substrings — voice-to-text friendly.
 Edit `lambda/phrases.py` to add aliases or new event types.
 
+## Backups & restore
+
+The `lily-events` table has three layers of protection against accidental loss:
+
+1. **`prevent_destroy`**: any Terraform plan that would destroy or replace the table fails
+   at plan time, before anything touches AWS.
+2. **Deletion protection**: AWS refuses to delete the table, whether from Terraform, the
+   console or the CLI.
+3. **Point-in-time recovery (PITR)**: 35 days of restorable history, plus a system backup
+   kept for 35 days if the table is deleted anyway.
+
+For a deliberate teardown:
+
+1. In `terraform/main.tf`, remove the `lifecycle { prevent_destroy = true }` block and set
+   `deletion_protection_enabled = false`. Then run `terraform apply`.
+2. Run `terraform destroy`.
+
+Do restores in the DynamoDB console with an identity that has data access. The Terraform
+and CI identities deliberately can't read or write items.
+
+- **Table was deleted:** open DynamoDB → Backups. Restore the system backup
+  `lily-events$DeletedTableBackup` as `lily-events`. If Terraform did the delete, run
+  `terraform import aws_dynamodb_table.lily_events lily-events`. Then run `terraform apply`.
+  A restored table doesn't inherit PITR, deletion protection or tags, and the apply puts
+  them back.
+- **Bad data, table intact:** restore the table to a point in time as a *new* table (e.g.
+  `lily-events-restore-YYYYMMDD`). Inspect it, copy back the items you need, then delete
+  the restore table.
+
 ## Costs
 
-~$0.50/month (AWS usage is within free tier for typical household use).
+~$0.50/month (AWS usage is within free tier for typical household use). PITR is billed per
+GB of table size (~$0.20/GB-month). At this table's size (well under 1 MB) that's effectively $0.

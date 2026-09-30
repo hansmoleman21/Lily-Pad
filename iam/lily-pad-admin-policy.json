@@ -16,6 +16,7 @@
         "dynamodb:DescribeTable",
         "dynamodb:UpdateTable",
         "dynamodb:DescribeContinuousBackups",
+        "dynamodb:UpdateContinuousBackups",
         "dynamodb:DescribeTimeToLive",
         "dynamodb:ListTagsOfResource",
         "dynamodb:TagResource",
