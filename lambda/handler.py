@@ -95,7 +95,10 @@ def validate_okta_token(auth_header: str) -> bool:
         # Log the reason only — never the token itself.
         print(f"WARN: Okta token rejected: {type(e).__name__}")
         return False
-    return claims.get("cid") == os.environ.get("OKTA_CLIENT_ID", "")
+    if claims.get("cid") != os.environ.get("OKTA_CLIENT_ID", ""):
+        print("WARN: Okta token rejected: cid mismatch")
+        return False
+    return True
 
 # ── Event display labels ──────────────────────────────────────────────────────
 
