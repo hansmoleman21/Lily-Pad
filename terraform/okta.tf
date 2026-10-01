@@ -38,3 +38,8 @@ resource "okta_app_group_assignments" "lily_pad_dashboard" {
     id = okta_group.lily_pad_dashboard_users.id
   }
 }
+
+resource "okta_group" "lily_pad_admins" {
+  name        = "lily-pad-admins"
+  description = "Admins for the Lily Pad app"
+}
