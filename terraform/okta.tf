@@ -43,3 +43,8 @@ resource "okta_group" "lily_pad_admins" {
   name        = "lily-pad-admins"
   description = "Admins for the Lily Pad app"
 }
+
+resource "okta_group" "lily_pad_helpdesk" {
+  name        = "lily-pad-helpdesk"
+  description = "Helpdesk access for the Lily Pad app"
+}
