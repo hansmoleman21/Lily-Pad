@@ -338,32 +338,35 @@ resource "aws_s3_object" "dashboard_image" {
 
 locals {
   data_url = "${trimsuffix(aws_apigatewayv2_stage.default.invoke_url, "/")}/data"
+}
 
-  index_html = templatefile("${path.module}/../dashboard/index.html.tpl", {
+module "private_dashboard" {
+  source        = "./modules/dashboard-page"
+  bucket_id     = aws_s3_bucket.dashboard.id
+  key           = "index.html"
+  template_path = "${path.module}/../dashboard/index.html.tpl"
+  template_vars = {
     api_url        = local.data_url
     okta_client_id = okta_app_oauth.dashboard.client_id
-  })
-
-  public_html = templatefile("${path.module}/../dashboard/public.html.tpl", {
-    api_url = local.data_url
-  })
+  }
 }
 
-resource "aws_s3_object" "dashboard_html" {
-  bucket        = aws_s3_bucket.dashboard.id
-  key           = "index.html"
-  content_type  = "text/html"
-  content       = local.index_html
-  etag          = md5(local.index_html)
-  cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
-
-}
-
-resource "aws_s3_object" "dashboard_html_public" {
-  bucket        = aws_s3_bucket.dashboard.id
+module "public_dashboard" {
+  source        = "./modules/dashboard-page"
+  bucket_id     = aws_s3_bucket.dashboard.id
   key           = "public.html"
-  content_type  = "text/html"
-  content       = local.public_html
-  etag          = md5(local.public_html)
-  cache_control = "no-cache" # HTML is the entry point: always revalidate, so config baked into it (e.g. the Okta client ID) takes effect immediately
+  template_path = "${path.module}/../dashboard/public.html.tpl"
+  template_vars = {
+    api_url = local.data_url
+  }
+}
+
+moved {
+  from = aws_s3_object.dashboard_html
+  to   = module.private_dashboard.aws_s3_object.page
+}
+
+moved {
+  from = aws_s3_object.dashboard_html_public
+  to   = module.public_dashboard.aws_s3_object.page
 }
