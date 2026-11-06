@@ -135,6 +135,18 @@ class TestHandleMessage:
         assert reply.startswith("Deleted: Lily pooped (normal)")
         assert h.query_last("poop") is None
 
-    def test_unknown_text_returns_help(self, events_table):
+    def test_unknown_text_asks_to_try_again(self, events_table):
         reply = events_table.handle_message("xyzzy")
-        assert reply.startswith("Didn't catch that")
+        assert reply == "Didn't catch that. Please try again."
+
+    def test_nope_records_a_note(self, events_table):
+        h = events_table
+        reply = h.handle_message("Nope, vet visit tomorrow")
+        assert reply == "Note recorded: vet visit tomorrow"
+        assert h.query_last("note")["attribute"] == "vet visit tomorrow"
+
+    def test_bare_nope_records_nothing(self, events_table):
+        h = events_table
+        reply = h.handle_message("nope")
+        assert reply == "Didn't catch that. Please try again."
+        assert h.query_last("note") is None

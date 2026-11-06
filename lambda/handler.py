@@ -621,16 +621,7 @@ def handle_message(body: str) -> str:
         attr_str = f" ({attribute})" if attribute else ""
         return f"Recorded: Lily {past_tense}{attr_str} {format_time(ts)}."
 
-    return (
-        "Didn't catch that. Try:\n"
-        "poop / soft poop / diarrhea\n"
-        "peed\n"
-        "vomited / bile / food\n"
-        "ate off the ground\n"
-        "walk, 35 minutes\n"
-        "medicine, 1 pill of Benadryl\n"
-        "last poop? / how many pees today?"
-    )
+    return "Didn't catch that. Please try again."
 
 
 # ── Dashboard data handler ────────────────────────────────────────────────────

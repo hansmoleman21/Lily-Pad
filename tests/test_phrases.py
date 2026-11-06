@@ -63,6 +63,20 @@ class TestPrefixMatchers:
     def test_note_requires_prefix(self):
         assert match_note("this is not a note") is None
 
+    def test_nope_is_a_note_alias(self):
+        assert match_note("Nope, vet visit tomorrow") == "vet visit tomorrow"
+
+    def test_nope_without_comma_is_not_a_note(self):
+        assert match_note("nope") is None
+        assert match_note("nope she did not") is None
+
+    def test_nope_empty_content_is_none(self):
+        assert match_note("nope,") is None
+        assert match_note("nope,   ") is None
+
+    def test_nope_only_matches_at_start(self):
+        assert match_note("she said nope, vet visit") is None
+
     def test_medicine_extracts_content(self):
         assert match_medicine("medicine, 1 pill of Benadryl") == "1 pill of Benadryl"
         assert match_medicine("meds, heartworm chew") == "heartworm chew"
